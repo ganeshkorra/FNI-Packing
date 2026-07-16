@@ -310,42 +310,42 @@ private showSlotCheckmark(targetSlot: Node, slotIndex: number) {
 private createClearSlotCheckmark(targetSlot: Node, slotIndex: number) {
     const checkNode = new Node(`Checkmark-${slotIndex + 1}`);
     targetSlot.addChild(checkNode);
-    checkNode.addComponent(UITransform).setContentSize(54, 42);
-    checkNode.setPosition(0, -34, 0);
+    checkNode.addComponent(UITransform).setContentSize(132, 72);
+    checkNode.setPosition(0, -40, 0);
     checkNode.setScale(v3(0, 0, 1));
 
     const back = new Node('CheckBack');
     checkNode.addChild(back);
     const backLabel = back.addComponent(Label);
     backLabel.string = '\u2713';
-    backLabel.fontSize = 46;
-    backLabel.lineHeight = 46;
+    backLabel.fontSize = 84;
+    backLabel.lineHeight = 84;
     backLabel.isBold = true;
     backLabel.color = new Color(119, 77, 0, 255);
 
     const middle = new Node('CheckMiddle');
     checkNode.addChild(middle);
-    middle.setPosition(0, 1.5, 0);
+    middle.setPosition(0, 3, 0);
     const middleLabel = middle.addComponent(Label);
     middleLabel.string = '\u2713';
-    middleLabel.fontSize = 41;
-    middleLabel.lineHeight = 41;
+    middleLabel.fontSize = 74;
+    middleLabel.lineHeight = 74;
     middleLabel.isBold = true;
     middleLabel.color = new Color(255, 143, 0, 255);
 
     const front = new Node('CheckFront');
     checkNode.addChild(front);
-    front.setPosition(0, 3, 0);
+    front.setPosition(0, 5, 0);
     const frontLabel = front.addComponent(Label);
     frontLabel.string = '\u2713';
-    frontLabel.fontSize = 36;
-    frontLabel.lineHeight = 36;
+    frontLabel.fontSize = 64;
+    frontLabel.lineHeight = 64;
     frontLabel.isBold = true;
     frontLabel.color = new Color(255, 246, 72, 255);
 
     this.checkmarkNodes[slotIndex] = checkNode;
     tween(checkNode)
-        .to(0.18, { scale: v3(1.3, 1.3, 1) }, { easing: 'backOut' })
+        .to(0.18, { scale: v3(1.45, 1.45, 1) }, { easing: 'backOut' })
         .to(0.12, { scale: Vec3.ONE }, { easing: 'quadOut' })
         .start();
 }
