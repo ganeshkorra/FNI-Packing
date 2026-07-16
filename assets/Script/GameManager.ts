@@ -47,6 +47,8 @@ export class GameManager extends Component {
     public tutorialHandScale: number = 3.0;
     @property({ type: Vec3 })
     public tutorialHandOffset: Vec3 = v3(-20, 30, 0);
+    @property({ type: Number, tooltip: "Delay before the first tutorial highlight appears." })
+    public tutorialStartDelay: number = 0.8;
     @property({ type: AudioSource, tooltip: "The background music." })
     public backgroundMusic: AudioSource | null = null;
     @property({ type: AudioSource, tooltip: "The sound for tapping a collectible." })
@@ -680,7 +682,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         this.layoutVisibleContainers(-1);
         this.drainWaitingForVisibleContainers();
         this.stopTutorial();
-        this.scheduleOnce(() => { this.triggerTutorial(); }, 0);
+        this.scheduleOnce(() => { this.triggerTutorial(); }, this.tutorialStartDelay);
     }
 
     private getUniqueCollectibleItems(): Node[] {
@@ -768,34 +770,30 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             this.playHintInstructionAnimation();
         }
 
-        const worldPos = targetNode.getComponent(UITransform)!.convertToWorldSpaceAR(v3(0, 0, 0));
-        const localPos = this.tutorialHintCoin.parent!.getComponent(UITransform)!.convertToNodeSpaceAR(worldPos);
-        this.tutorialHintCoin.setPosition(localPos);
-        this.tutorialHintGlow.setPosition(localPos);
-
         const targetSprite = targetNode.getComponent(Sprite);
         const hintSprite = this.tutorialHintCoin.getComponent(Sprite);
         if (targetSprite && hintSprite) {
             hintSprite.spriteFrame = targetSprite.spriteFrame;
         }
-        this.tutorialHintCoin.setScale(targetNode.getScale());
         this.tutorialHintCoin.active = true;
         this.tutorialHintGlow.active = true;
+        this.placeTutorialTargets(targetNode);
 
         if (this.coinTween) { this.coinTween.stop(); }
-        this.coinTween = tween(this.tutorialHintCoin)
-            .to(0, { scale: new Vec3(1, 1, 1) },)
-            .union().repeatForever().start();
+        this.coinTween = null;
+        this.tutorialHintCoin.setScale(this.getTutorialCoinScale(targetNode, 1));
 
         if (this.glowTween) { this.glowTween.stop(); }
-        const glowBaseScale = 1.5;
-        this.tutorialHintGlow.setScale(new Vec3(glowBaseScale, glowBaseScale, 1));
+        const glowBaseScale = this.getTutorialGlowScale(targetNode, 1.25);
         this.glowTween = tween(this.tutorialHintGlow)
-            .to(1.0, { scale: new Vec3(glowBaseScale * 1.2, glowBaseScale * 1.2, 1) }, { easing: 'sineInOut' })
-            .to(1.0, { scale: new Vec3(glowBaseScale, glowBaseScale, 1) }, { easing: 'sineInOut' })
+            .to(0.75, { scale: this.getTutorialGlowScale(targetNode, 1.45) }, { easing: 'sineInOut' })
+            .to(0.75, { scale: glowBaseScale }, { easing: 'sineInOut' })
             .union().repeatForever().start();
 
-        if (this.handNode) { this.handNode.active = true; }
+        if (this.handNode) {
+            this.handNode.active = true;
+            this.handNode.setScale(v3(0, 0, 1));
+        }
         this.runTapAnimationLoop(targetNode);
     }
 
@@ -846,14 +844,13 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
     // Add this to your update() method
     update(deltaTime: number) {
+        if (this.isHintActive || (!this.isGameStarted && this.tutorialHintCoin?.active)) {
+            this.syncTutorialElements();
+        }
+
         if (!this.isGameStarted || this.isGameOver) return;
         this.updateGameTimer(deltaTime);
         this.updateIdleTimer(deltaTime);
-
-        // --- ADD THIS: SYNC TUTORIAL POSITIONS EVERY FRAME ---
-        if (this.isHintActive || (!this.isGameStarted && this.tutorialTargetCoin)) {
-            this.syncTutorialElements();
-        }
     }
 
     /**
@@ -867,35 +864,52 @@ private syncTutorialElements() {
     const target = this.isHintActive ? this._currentHintTarget : this.tutorialTargetCoin;
     if (!target || !target.isValid || !this.tutorialHintCoin || !this.handNode) return;
 
-    // --- STEP A: Get the World Position (The exact screen pixel) ---
-    const itemUIT = target.getComponent(UITransform)!;
-    // (0,0,0) is the center of the item. This returns where that center is on your screen.
-    const worldPos = itemUIT.convertToWorldSpaceAR(new Vec3(0, 0, 0));
+    this.placeTutorialTargets(target);
+}
 
-    // --- STEP B: Find the Canvas Layer (The fixed layer) ---
-    // We convert the World Pixel to the space of the node that HOLDS the hand
-    const uiParentUIT = this.handNode.parent!.getComponent(UITransform)!;
-    const localPos = uiParentUIT.convertToNodeSpaceAR(worldPos);
+private placeTutorialTargets(target: Node) {
+    const localPos = this.getTutorialLayerPosition(target);
+    if (!localPos) return;
 
-    // --- STEP C: Apply Position ---
-    this.tutorialHintCoin.setPosition(localPos);
-    if (this.tutorialHintGlow) this.tutorialHintGlow.setPosition(localPos);
-
-    // Add your offset so the hand points at the item instead of covering it
-    const finalHandPos = new Vec3(localPos.x + this.tutorialHandOffset.x, localPos.y + this.tutorialHandOffset.y, 0);
-    this.handNode.setPosition(finalHandPos);
-
-    // --- STEP D: Sync Scale ---
-    // Search the scene for the Camera Controller if we don't have a direct link
-    let camScript = this.node.scene.getComponentInChildren(CameraPinchZoom);
-    if (camScript) {
-        const currentZoom = camScript.currentScale;
-        // The Hint Item must match the background zoom scale
-        this.tutorialHintCoin.setScale(v3(currentZoom, currentZoom, 1));
-        
-        // Match hand size slightly to the zoom (optional)
-        // this.handNode.setScale(v3(this.tutorialHandScale * currentZoom, this.tutorialHandScale * currentZoom, 1));
+    if (this.tutorialHintCoin) {
+        this.tutorialHintCoin.setPosition(localPos);
     }
+    if (this.tutorialHintGlow) {
+        this.tutorialHintGlow.setPosition(localPos);
+    }
+    if (this.handNode) {
+        this.handNode.setPosition(localPos.x + this.tutorialHandOffset.x, localPos.y + this.tutorialHandOffset.y, 0);
+    }
+}
+
+private getTutorialLayerPosition(target: Node): Vec3 | null {
+    if (!target || !target.isValid || !this.tutorialHintCoin?.parent) return null;
+
+    const itemUIT = target.getComponent(UITransform);
+    const tutorialParentUIT = this.tutorialHintCoin.parent.getComponent(UITransform);
+    if (!itemUIT || !tutorialParentUIT) return null;
+
+    const worldPos = itemUIT.convertToWorldSpaceAR(Vec3.ZERO);
+    return tutorialParentUIT.convertToNodeSpaceAR(worldPos);
+}
+
+private getTutorialCoinScale(target: Node, multiplier: number = 1): Vec3 {
+    const worldScale = target.worldScale;
+    return v3(Math.abs(worldScale.x) * multiplier, Math.abs(worldScale.y) * multiplier, 1);
+}
+
+private getTutorialGlowScale(target: Node, multiplier: number = 1): Vec3 {
+    const targetUIT = target.getComponent(UITransform);
+    const glowUIT = this.tutorialHintGlow?.getComponent(UITransform);
+    if (!targetUIT || !glowUIT || glowUIT.contentSize.width <= 0 || glowUIT.contentSize.height <= 0) {
+        return v3(multiplier, multiplier, 1);
+    }
+
+    const worldScale = target.worldScale;
+    const targetWidth = targetUIT.contentSize.width * Math.abs(worldScale.x);
+    const targetHeight = targetUIT.contentSize.height * Math.abs(worldScale.y);
+    const fit = Math.max(targetWidth / glowUIT.contentSize.width, targetHeight / glowUIT.contentSize.height) * multiplier;
+    return v3(fit, fit, 1);
 }
 
     // Update your triggerHint to store the current target
@@ -944,17 +958,19 @@ private syncTutorialElements() {
         this.syncTutorialElements();
 
         const baseScale = new Vec3(this.tutorialHandScale, this.tutorialHandScale, 1);
-        const pressedScale = new Vec3(this.tutorialHandScale * 0.9, this.tutorialHandScale * 0.9, 1);
+        const pressedScale = new Vec3(this.tutorialHandScale * 0.94, this.tutorialHandScale * 0.94, 1);
 
         this.handTween = tween(this.handNode)
+            .to(0.28, { scale: baseScale }, { easing: 'backOut' })
+            .delay(0.25)
             .repeatForever(
                 tween()
-                    .delay(0.6)
+                    .delay(0.55)
                     .call(() => { handSprite.spriteFrame = this.clickHandSprite!; })
-                    .to(0.2, { scale: pressedScale }, { easing: 'sineOut' })
-                    .delay(0.15)
+                    .to(0.12, { scale: pressedScale }, { easing: 'sineOut' })
+                    .delay(0.1)
                     .call(() => { handSprite.spriteFrame = this.idleHandSprite!; })
-                    .to(0.3, { scale: baseScale }, { easing: 'sineIn' })
+                    .to(0.18, { scale: baseScale }, { easing: 'sineIn' })
             )
             .start();
     }

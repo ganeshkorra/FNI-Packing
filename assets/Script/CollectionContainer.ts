@@ -157,25 +157,24 @@ public completionCheckmark: Node | null = null; // A green checkmark or 'Done' t
             onUpdate: () => {
                 const currentPos = movingNode.position;
                 
-                // DRAW THE BLUE BEAM
+                // Draw a soft golden trail behind the flying item.
                 mainGraphics.clear();
-                mainGraphics.lineWidth = 18;
-                mainGraphics.strokeColor = new Color(80, 180, 255, 150);
+                mainGraphics.lineWidth = 14;
+                mainGraphics.strokeColor = new Color(255, 214, 74, 120);
                 mainGraphics.moveTo(startLocalPos.x, startLocalPos.y);
                 mainGraphics.lineTo(currentPos.x, currentPos.y);
                 mainGraphics.stroke();
 
-               // Inside your tween(movingNode).to updates
-starSpawnTimer += 0.016; 
-if (starSpawnTimer > 0.02) { // Slightly slower spawn rate for bigger flakes
-    const jitterPos = v3(
-        currentPos.x + (Math.random() - 0.5) * 30, // Wider trail
-        currentPos.y + (Math.random() - 0.5) * 30, 
-        currentPos.z
-    );
-    this.createCodeSnow(canvas, jitterPos);
-    starSpawnTimer = 0;
-}
+                starSpawnTimer += 0.016;
+                if (starSpawnTimer > 0.035) {
+                    const jitterPos = v3(
+                        currentPos.x + (Math.random() - 0.5) * 34,
+                        currentPos.y + (Math.random() - 0.5) * 34,
+                        currentPos.z
+                    );
+                    this.createCodeStar(canvas, jitterPos);
+                    starSpawnTimer = 0;
+                }
             }
         })
        .call(() => {
@@ -281,48 +280,43 @@ private showSlotCheckmark(targetSlot: Node, slotIndex: number) {
         .start();
 }
 
-/**
- * Creates a snowflake sparkle node entirely from code (no image files needed)
- */
-/**
- * Creates a soft snowflake particle entirely from code
- */
-private createCodeSnow(parent: Node, position: Vec3) {
-    const snowNode = new Node("Snowflake");
-    parent.addChild(snowNode);
-    snowNode.setPosition(position);
-    
-    // Add UIOpacity so we can fade them out smoothly
-    const opacityComp = snowNode.addComponent(UIOpacity);
-    const g = snowNode.addComponent(Graphics);
-    
-    // 1. Drawing a soft round snowflake
-    const size = 3 + Math.random() * 6; // Variety in snow size
-    g.fillColor = new Color(255, 255, 255, 255); // Pure White
-    g.circle(0, 0, size);
+private createCodeStar(parent: Node, position: Vec3) {
+    const starNode = new Node("StarSparkle");
+    parent.addChild(starNode);
+    starNode.setPosition(position);
+    starNode.setScale(v3(0.25, 0.25, 1));
+
+    const opacityComp = starNode.addComponent(UIOpacity);
+    const g = starNode.addComponent(Graphics);
+    const outerRadius = 8 + Math.random() * 5;
+    const innerRadius = outerRadius * 0.42;
+    const points = 5;
+
+    g.fillColor = new Color(255, 244, 106, 255);
+    for (let i = 0; i < points * 2; i++) {
+        const radius = i % 2 === 0 ? outerRadius : innerRadius;
+        const angle = -Math.PI / 2 + i * Math.PI / points;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+        if (i === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
+    }
+    g.close();
     g.fill();
 
-    // 2. Add a slight "glow" or blur look (optional second circle)
-    g.fillColor = new Color(255, 255, 255, 100); 
-    g.circle(0, 0, size * 1.5);
-    g.fill();
+    g.strokeColor = new Color(255, 151, 24, 220);
+    g.lineWidth = 2;
+    g.stroke();
 
-    // 3. Movement Logic: "Swaying Flutter"
-    // Drift down significantly, but sway left and right like real snow
-    const driftY = -(80 + Math.random() * 60);  // Falling down
-    const swayX = (Math.random() - 0.5) * 50;   // Random horizontal drift
-    const duration = 1.0 + Math.random() * 0.5; // Each flake lasts ~1-1.5s
-
-    tween(snowNode)
+    const drift = v3((Math.random() - 0.5) * 42, 24 + Math.random() * 36, 0);
+    const duration = 0.55 + Math.random() * 0.25;
+    tween(starNode)
         .parallel(
-            // Position: Drifts down and sways
-            tween().by(duration, { position: v3(swayX, driftY, 0) }, { easing: 'sineOut' }),
-            // Scale: Shrinks slowly as it disappears
-            tween().to(duration, { scale: v3(0.2, 0.2, 1) }),
-            // Opacity: Fades out
-            tween(opacityComp).to(duration, { opacity: 0 }, { easing: 'quadIn' })
+            tween().by(duration, { position: drift, angle: (Math.random() > 0.5 ? 1 : -1) * 180 }, { easing: 'sineOut' }),
+            tween().to(0.12, { scale: v3(1, 1, 1) }, { easing: 'backOut' }).to(duration - 0.12, { scale: v3(0.15, 0.15, 1) }),
+            tween(opacityComp).delay(0.12).to(duration - 0.12, { opacity: 0 }, { easing: 'quadIn' })
         )
-        .call(() => snowNode.destroy())
+        .call(() => starNode.destroy())
         .start();
 }
     
