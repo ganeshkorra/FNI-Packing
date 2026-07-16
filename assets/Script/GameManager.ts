@@ -406,6 +406,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         coinNode.getComponent(CollectibleCoin)?.onCollectionStart();
         const displayNode = this.createWaitingDisplay(spriteFrame, worldPos, slotNode);
         this.waitingEntries.push({ itemNode: coinNode, spriteFrame, displayNode, slotNode, container: targetContainer });
+        this.compactWaitingSlots();
         return true;
     }
 
@@ -413,6 +414,33 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         return this.waitingSlots.find(slot => {
             return !!slot && this.waitingEntries.every(entry => entry.slotNode !== slot);
         }) || null;
+    }
+
+    private compactWaitingSlots() {
+        const validEntries = this.waitingEntries
+            .filter((entry): entry is WaitingEntry => !!entry && !!entry.displayNode && entry.displayNode.isValid)
+            .sort((a, b) => {
+                const aIndex = this.waitingSlots.indexOf(a.slotNode);
+                const bIndex = this.waitingSlots.indexOf(b.slotNode);
+                return aIndex - bIndex;
+            });
+
+        validEntries.forEach((entry, index) => {
+            const targetSlot = this.waitingSlots[index];
+            if (!targetSlot || !targetSlot.isValid) return;
+
+            if (entry.slotNode === targetSlot) return;
+
+            entry.slotNode = targetSlot;
+            const slotScale = this.getWaitingFitScale(entry.spriteFrame, targetSlot);
+            entry.displayNode.setParent(targetSlot, true);
+            entry.displayNode.setPosition(Vec3.ZERO);
+            entry.displayNode.setScale(slotScale);
+
+            tween(entry.displayNode)
+                .to(0.18, { position: Vec3.ZERO, scale: slotScale }, { easing: 'sineInOut' })
+                .start();
+        });
     }
 
     private createWaitingDisplay(spriteFrame: SpriteFrame, startWorldPos: Vec3, slotNode: Node): Node {
@@ -497,6 +525,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             () => {
                 const entryIndex = this.waitingEntries.indexOf(entry);
                 if (entryIndex > -1) this.waitingEntries.splice(entryIndex, 1);
+                this.compactWaitingSlots();
                 this.scheduleOnce(() => this.drainWaitingForVisibleContainers(), 0.15);
             }
         );
@@ -504,6 +533,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         if (!accepted) {
             const entryIndex = this.waitingEntries.indexOf(entry);
             if (entryIndex > -1) this.waitingEntries.splice(entryIndex, 1);
+            this.compactWaitingSlots();
         }
     }
 
