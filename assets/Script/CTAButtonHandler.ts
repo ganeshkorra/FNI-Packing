@@ -1,4 +1,4 @@
-import { _decorator, Component, AudioSource, find, CCString, sys } from 'cc';
+import { _decorator, Component, AudioSource, find, CCString, sys, tween } from 'cc';
 import { Analytics, analyticsEvents } from './Analytics';
 
 // Declare the mraid object provided by the ad network environment
@@ -34,6 +34,19 @@ export class CTAButtonHandler extends Component {
         } else {
             console.warn("MRAID library not found. Fallback to window.open.");
         }
+
+        this.startButtonSwing();
+    }
+
+    private startButtonSwing(): void {
+        if (!this.node || !this.node.isValid) return;
+
+        tween(this.node)
+            .to(0.55, { angle: -4 }, { easing: 'quadInOut' })
+            .to(0.55, { angle: 4 }, { easing: 'quadInOut' })
+            .union()
+            .repeatForever()
+            .start();
     }
 
     private onMraidReady(): void {
