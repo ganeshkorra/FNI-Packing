@@ -4,6 +4,7 @@ import { _decorator, Component, Node, director, ProgressBar, Label, Button, twee
 import { CollectibleCoin, COLLECT_COIN_EVENT } from './CollectibleCoin';
 import { CollectionContainer, CONTAINER_COMPLETE_EVENT } from './CollectionContainer';
 import { CameraPinchZoom } from './CameraPinchZoom';
+import { Analytics, analyticsEvents } from './Analytics';
 
 declare const mraid: any;
 const { ccclass, property } = _decorator;
@@ -128,6 +129,9 @@ public waitingAutoFlyDelay: number = 0.58;
     private visibleCollectionLanes: (CollectionContainer | null)[] = [];
     private introHomeScales: Map<Node, Vec3> = new Map();
     private isIntroPlaying: boolean = false;
+    private hasSentProgress25: boolean = false;
+    private hasSentProgress50: boolean = false;
+    private hasSentProgress75: boolean = false;
 
     onLoad() {
         this.prepareCollectionSystem();
@@ -539,6 +543,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
     private startGame() {
         this.isGameStarted = true;
+        this.trackAnalytics(analyticsEvents.CHALLENGE_STARTED);
         this.stopTutorial();
         this.ZoomAnim.active = false;
         this.hideInstructionText();
@@ -550,6 +555,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
    private endGame(didWin: boolean) {
     if (this.isGameOver) return;
     this.isGameOver = true;
+    this.trackAnalytics(didWin ? analyticsEvents.CHALLENGE_SOLVED : analyticsEvents.CHALLENGE_FAILED);
 
     if (this.backgroundMusic) { this.backgroundMusic.stop(); }
     this.stopTutorial();
@@ -634,6 +640,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
     private showEndScreen() {
         if (this.endScreenPanel) {
+            this.trackAnalytics(analyticsEvents.ENDCARD_SHOWN);
             this.endScreenPanel.active = true;
 
             const panelOpacity = this.endScreenPanel.getComponent(UIOpacity);
@@ -679,6 +686,9 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
         this.isGameStarted = false; this.isGameOver = false; this.isHintActive = false;
         this.totalCoinsCollected = 0; this.currentTime = this.gameDuration;
+        this.hasSentProgress25 = false;
+        this.hasSentProgress50 = false;
+        this.hasSentProgress75 = false;
         this.activeContainerIndex = 0;
         this.routedItems.length = 0;
         this.completedCollectionContainers.length = 0;
@@ -744,6 +754,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             .delay(0.68 + revealNodes.length * 0.03)
             .call(() => {
                 this.isIntroPlaying = false;
+                this.trackAnalytics(analyticsEvents.DISPLAYED);
                 this.scheduleOnce(() => this.triggerTutorial(), this.tutorialStartDelay + this.tutorialAfterIntroDelay);
             })
             .start();
@@ -853,6 +864,29 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         if (this.mainProgressBar) {
             this.mainProgressBar.progress = this.totalCollectibleCount > 0 ? this.currentCollectibleCount / this.totalCollectibleCount : 0;
         }
+        this.trackChallengeProgressMilestones();
+    }
+
+    private trackChallengeProgressMilestones() {
+        if (!this.isGameStarted || this.totalCollectibleCount <= 0) return;
+
+        const progress = this.currentCollectibleCount / this.totalCollectibleCount;
+        if (!this.hasSentProgress25 && progress >= 0.25) {
+            this.hasSentProgress25 = true;
+            this.trackAnalytics(analyticsEvents.CHALLENGE_PASS_25);
+        }
+        if (!this.hasSentProgress50 && progress >= 0.5) {
+            this.hasSentProgress50 = true;
+            this.trackAnalytics(analyticsEvents.CHALLENGE_PASS_50);
+        }
+        if (!this.hasSentProgress75 && progress >= 0.75) {
+            this.hasSentProgress75 = true;
+            this.trackAnalytics(analyticsEvents.CHALLENGE_PASS_75);
+        }
+    }
+
+    private trackAnalytics(eventName: analyticsEvents) {
+        Analytics.track(eventName);
     }
 
     private triggerTutorial() {

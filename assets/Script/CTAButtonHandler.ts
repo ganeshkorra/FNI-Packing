@@ -1,4 +1,5 @@
 import { _decorator, Component, AudioSource, find, CCString, sys } from 'cc';
+import { Analytics, analyticsEvents } from './Analytics';
 
 // Declare the mraid object provided by the ad network environment
 declare const mraid: any;
@@ -57,6 +58,7 @@ export class CTAButtonHandler extends Component {
      * Linked to the CTA button's click event in the Cocos Inspector
      */
     public onStoreButtonClicked(): void {
+        Analytics.track(analyticsEvents.CTA_CLICKED);
         const targetUrl = this.getTargetStoreUrl();
         console.log("CTA Triggered. Target URL:", targetUrl);
 
