@@ -1,7 +1,7 @@
-// FILE: CollectionContainer.ts (Final version with UI Panel Animation)
+// FILE: CollectionContainer.ts
 
-import { _decorator, Component, Node, Label, ProgressBar, director, Vec3,Layout,Size, tween, Sprite, SpriteFrame, AudioSource, UITransform, UIOpacity, Prefab, instantiate, ParticleSystem2D, v3, Color, Graphics } from 'cc';
-import { CollectibleCoin, COLLECT_COIN_EVENT } from './CollectibleCoin';
+import { _decorator, Component, Node, Label, ProgressBar, director, Vec3, tween, Sprite, SpriteFrame, AudioSource, UITransform, UIOpacity, Prefab, v3, Color, Graphics } from 'cc';
+import { CollectibleCoin } from './CollectibleCoin';
 
 
 const { ccclass, property } = _decorator;
@@ -32,45 +32,106 @@ export class CollectionContainer extends Component {
     public containerCompleteSound: AudioSource | null = null;
     @property(Node)
 public completionCheckmark: Node | null = null; // A green checkmark or 'Done' text
+    @property({ type: [Node], tooltip: 'Optional explicit target slots. If empty, the first children of this panel are used.' })
+    public targetSlots: Node[] = [];
 
     private totalItems: number = 0;
     private collectedItems: number = 0;
     private isComplete: boolean = false;
     private originalScale: Vec3 = new Vec3(1, 1, 1);
+    private collectedItemNodes: Node[] = [];
+    private checkmarkNodes: Node[] = [];
+    private slotOriginalScales: Vec3[] = [];
 
     onLoad() {
-         if (this.collectibleItems) {
-        this.totalItems = this.collectibleItems.length;
-    } else {
-        this.totalItems = 0;
-        console.warn("No items assigned to container:", this.node.name);
-    }
-        this.totalItems = this.collectibleItems.length;
+        this.totalItems = this.getOrderedItems().length;
         this.updateUI();
-        director.on(COLLECT_COIN_EVENT, this.onItemClicked, this);
         this.originalScale.set(this.node.scale); // Store the panel's original scale
     }
 
     onDestroy() {
-        director.off(COLLECT_COIN_EVENT, this.onItemClicked, this);
+        this.checkmarkNodes.length = 0;
     }
 
-    private onItemClicked(itemNode: Node, spriteFrame: SpriteFrame, worldPos: Vec3) {
-        if (this.isComplete || this.collectibleItems.indexOf(itemNode) === -1) {
-            return;
+    public getItemCount(): number {
+        return this.getOrderedItems().length;
+    }
+
+    public containsItem(itemNode: Node): boolean {
+        return this.getSlotIndexForItem(itemNode) !== -1;
+    }
+
+    public getSlotIndexForItem(itemNode: Node): number {
+        return this.getOrderedItems().indexOf(itemNode);
+    }
+
+    public collectItem(
+        itemNode: Node,
+        spriteFrame: SpriteFrame,
+        worldPos: Vec3,
+        hideSourceItem: boolean = true,
+        sourceDisplayNode: Node | null = null,
+        onPlaced: (() => void) | null = null
+    ): boolean {
+        if (this.isComplete || !itemNode || !spriteFrame) return false;
+
+        const slotIndex = this.getSlotIndexForItem(itemNode);
+        if (slotIndex === -1 || this.collectedItemNodes.indexOf(itemNode) !== -1) {
+            return false;
         }
-        itemNode.getComponent(CollectibleCoin)?.onCollectionStart();
-        this.playCollectionEffects(spriteFrame, worldPos);
+
+        if (hideSourceItem) {
+            itemNode.getComponent(CollectibleCoin)?.onCollectionStart();
+        }
+        if (sourceDisplayNode && sourceDisplayNode.isValid) {
+            sourceDisplayNode.active = false;
+        }
+
+        this.playCollectionEffects(itemNode, spriteFrame, worldPos, slotIndex, sourceDisplayNode, onPlaced);
+        return true;
     }
 
-    private playCollectionEffects(flyingSpriteFrame: SpriteFrame, startWorldPos: Vec3) {
-    if (!this.itemIcon) return;
+    private getOrderedItems(): Node[] {
+        return (this.collectibleItems || []).filter((item): item is Node => !!item && item.isValid);
+    }
+
+    private getTargetSlot(slotIndex: number): Node | null {
+        const explicitSlot = this.targetSlots && this.targetSlots[slotIndex];
+        if (explicitSlot && explicitSlot.isValid) return explicitSlot;
+
+        const childSlot = this.node.children[slotIndex];
+        if (childSlot && childSlot.isValid) return childSlot;
+
+        return this.createRuntimeSlot(slotIndex);
+    }
+
+    private createRuntimeSlot(slotIndex: number): Node {
+        const slotNode = new Node(`Slot-${slotIndex + 1}`);
+        this.node.addChild(slotNode);
+        slotNode.addComponent(UITransform).setContentSize(80, 80);
+        slotNode.addComponent(Sprite);
+        slotNode.setPosition((slotIndex - 1) * 70, 0, 0);
+        return slotNode;
+    }
+
+    private playCollectionEffects(
+        itemNode: Node,
+        flyingSpriteFrame: SpriteFrame,
+        startWorldPos: Vec3,
+        slotIndex: number,
+        sourceDisplayNode: Node | null,
+        onPlaced: (() => void) | null
+    ) {
+    const targetSlot = this.getTargetSlot(slotIndex) || this.itemIcon?.node || null;
+    if (!targetSlot) return;
     const canvas = this.node.scene.getChildByName('Canvas');
     if (!canvas) return;
 
     const canvasUIT = canvas.getComponent(UITransform)!;
     const startLocalPos = canvasUIT.convertToNodeSpaceAR(startWorldPos);
-    const targetLocalPos = canvasUIT.convertToNodeSpaceAR(this.itemIcon.node.worldPosition);
+    const targetLocalPos = canvasUIT.convertToNodeSpaceAR(targetSlot.worldPosition);
+    const sourceScale = this.getCanvasSpaceScale(sourceDisplayNode || itemNode);
+    const targetScale = this.getCanvasSpaceScale(targetSlot);
     
     const flightDuration = 0.6;
     let starSpawnTimer = 0;
@@ -83,13 +144,15 @@ public completionCheckmark: Node | null = null; // A green checkmark or 'Done' t
     // --- 2. The Flying Item ---
     const movingNode = new Node("FlyingItem");
     canvas.addChild(movingNode);
+    const movingUIT = movingNode.addComponent(UITransform);
     const sprite = movingNode.addComponent(Sprite);
     sprite.spriteFrame = flyingSpriteFrame;
+    this.copyVisualSize(targetSlot, movingUIT, sprite);
     movingNode.setPosition(startLocalPos);
-    movingNode.setScale(1, 1, 1);
+    movingNode.setScale(sourceScale);
 
     tween(movingNode)
-        .to(flightDuration, { position: targetLocalPos, scale: v3(0.6, 0.6, 1) }, { 
+        .to(flightDuration, { position: targetLocalPos, scale: targetScale }, { 
             easing: 'sineIn',
             onUpdate: () => {
                 const currentPos = movingNode.position;
@@ -121,18 +184,25 @@ if (starSpawnTimer > 0.02) { // Slightly slower spawn rate for bigger flakes
             // 1. Cleanup visuals
             movingNode.destroy();
             rayNode.destroy();
+            if (sourceDisplayNode && sourceDisplayNode.isValid) {
+                sourceDisplayNode.destroy();
+            }
+
+            this.settleItemInSlot(targetSlot, flyingSpriteFrame, slotIndex);
 
             // 2. Play UI Punch effect
             this.playCollectionBounce();
 
             // 3. Increment internal progress
-            this.collectedItems++;
+            this.collectedItemNodes.push(itemNode);
+            this.collectedItems = this.collectedItemNodes.length;
             
             // 4. Update the actual UI Bar and Numbers
             this.updateUI();
 
             // 5. Play sounds
             if (this.itemCollectSound) this.itemCollectSound.play();
+            if (onPlaced) onPlaced();
 
             // 6. Check if THIS bucket is finished
             if (this.collectedItems >= this.totalItems) {
@@ -141,6 +211,73 @@ if (starSpawnTimer > 0.02) { // Slightly slower spawn rate for bigger flakes
 
             // --- THE CRITICAL FIX END ---
         })
+        .start();
+}
+
+private getCanvasSpaceScale(node: Node): Vec3 {
+    const worldScale = node.worldScale;
+    return v3(Math.abs(worldScale.x), Math.abs(worldScale.y), 1);
+}
+
+private copyVisualSize(sizeSourceNode: Node, targetUIT: UITransform, sprite: Sprite) {
+    const sourceUIT = sizeSourceNode.getComponent(UITransform);
+    if (sourceUIT) {
+        targetUIT.setContentSize(sourceUIT.contentSize);
+        (sprite as any).sizeMode = Sprite.SizeMode.CUSTOM;
+    }
+}
+
+private settleItemInSlot(targetSlot: Node, spriteFrame: SpriteFrame, slotIndex: number) {
+    const targetSprite = targetSlot.getComponent(Sprite);
+    if (targetSprite) {
+        targetSprite.spriteFrame = spriteFrame;
+        targetSprite.enabled = true;
+    }
+    const originalSlotScale = this.slotOriginalScales[slotIndex] || targetSlot.scale.clone();
+    this.slotOriginalScales[slotIndex] = originalSlotScale.clone();
+    targetSlot.active = true;
+    targetSlot.setScale(v3(originalSlotScale.x * 0.92, originalSlotScale.y * 0.92, originalSlotScale.z));
+    tween(targetSlot)
+        .to(0.18, { scale: v3(originalSlotScale.x * 1.08, originalSlotScale.y * 1.08, originalSlotScale.z) }, { easing: 'quadOut' })
+        .to(0.22, { scale: originalSlotScale }, { easing: 'backOut' })
+        .start();
+
+    this.showSlotCheckmark(targetSlot, slotIndex);
+}
+
+private showSlotCheckmark(targetSlot: Node, slotIndex: number) {
+    if (this.checkmarkNodes[slotIndex] && this.checkmarkNodes[slotIndex].isValid) {
+        this.checkmarkNodes[slotIndex].active = true;
+        return;
+    }
+
+    const checkNode = new Node(`Checkmark-${slotIndex + 1}`);
+    targetSlot.addChild(checkNode);
+    checkNode.addComponent(UITransform).setContentSize(42, 34);
+    checkNode.setPosition(0, -45, 0);
+    checkNode.setScale(v3(0, 0, 1));
+
+    const shadow = new Node('CheckShadow');
+    checkNode.addChild(shadow);
+    shadow.setPosition(1.5, -1.5, 0);
+    const shadowLabel = shadow.addComponent(Label);
+    shadowLabel.string = '✓';
+    shadowLabel.fontSize = 34;
+    shadowLabel.lineHeight = 34;
+    shadowLabel.color = new Color(206, 128, 0, 255);
+
+    const front = new Node('CheckFront');
+    checkNode.addChild(front);
+    const label = front.addComponent(Label);
+    label.string = '✓';
+    label.fontSize = 34;
+    label.lineHeight = 34;
+    label.color = new Color(255, 234, 48, 255);
+
+    this.checkmarkNodes[slotIndex] = checkNode;
+    tween(checkNode)
+        .to(0.18, { scale: v3(1.25, 1.25, 1) }, { easing: 'backOut' })
+        .to(0.12, { scale: Vec3.ONE }, { easing: 'quadOut' })
         .start();
 }
 
@@ -221,16 +358,13 @@ private onContainerComplete() {
     this.isComplete = true;
 
     if (this.containerCompleteSound) this.containerCompleteSound.play();
+    director.emit(CONTAINER_COMPLETE_EVENT, this);
 
     // 1. Scale Up Animation (Celebration)
     tween(this.node)
         .to(0.2, { scale: v3(1.15, 1.15, 1) }, { easing: 'quadOut' })
         .delay(0.4)
         .call(() => {
-            // Tell GameManager to realign the other containers NOW
-            // We pass this node so the manager knows which one to ignore
-            director.emit('REARRANGE_CONTAINERS', this.node);
-
             // 2. Disappear Animation
             tween(this.node.getComponent(UIOpacity) || this.node.addComponent(UIOpacity))
                 .to(0.3, { opacity: 0 })
@@ -246,8 +380,19 @@ private onContainerComplete() {
         .start();
 }
     public resetContainer() {
+        if (!this.node || !this.node.isValid) return;
+
         this.collectedItems = 0;
         this.isComplete = false;
+        this.collectedItemNodes.length = 0;
+        this.totalItems = this.getOrderedItems().length;
+        this.checkmarkNodes.forEach((node) => {
+            if (node && node.isValid) node.destroy();
+        });
+        this.checkmarkNodes.length = 0;
+        const opacity = this.node.getComponent(UIOpacity) || this.node.addComponent(UIOpacity);
+        opacity.opacity = 255;
+        this.node.setScale(this.originalScale);
         this.updateUI();
     }
 }

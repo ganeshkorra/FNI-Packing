@@ -1,6 +1,5 @@
-// FILE: CollectibleCoin.ts (Simplified back to its original purpose)
-import { CameraPinchZoom } from './CameraPinchZoom';
-import { _decorator, Component, Node, Sprite, Button, director, Vec3, AudioSource, tween } from 'cc';
+// FILE: CollectibleCoin.ts
+import { _decorator, Component, Node, Sprite, Button, director, Vec3, AudioSource } from 'cc';
 
 const { ccclass, property } = _decorator;
 
@@ -27,18 +26,6 @@ export class CollectibleCoin extends Component {
             this.buttonComponent.node.on(Button.EventType.CLICK, this.onCoinClicked, this);
         }
     }
-// Inside CollectibleCoin.ts (the function called when the node is clicked)
- 
-    // Import CameraPinchZoom
-public onCoinTapped() {
-    // Check if the camera script is currently zooming or dragging
-    // if (CameraPinchZoom.IsBusy) {
-    //     return; // EXIT and do nothing
-    // }
-
-    // Normal logic to collect the coin below...
-    // this.onCollectionStart(); 
-}
     private onCoinClicked() {
         if (this.isCollected) return;
 
@@ -57,18 +44,7 @@ public onCoinTapped() {
         this.isCollected = true;
         this.node.active = false;
     }
-// Inside CollectibleCoin.ts
 
-public onItemTap() {
-    // Immediate check of the Static Flag from Camera script
-    // if (CameraPinchZoom.IsBusy) {
-    //     console.log("Item click cancelled by CameraPinchZoom activity.");
-    //     return; 
-    // }
-
-    // Proceed to collection
-    director.emit(COLLECT_COIN_EVENT, this.node, );
-}
     public resetCoin() {
         this.isCollected = false;
         this.node.active = true;

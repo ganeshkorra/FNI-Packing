@@ -8,6 +8,14 @@ import { CameraPinchZoom } from './CameraPinchZoom';
 declare const mraid: any;
 const { ccclass, property } = _decorator;
 
+type WaitingEntry = {
+    itemNode: Node;
+    spriteFrame: SpriteFrame;
+    displayNode: Node;
+    slotNode: Node;
+    container: CollectionContainer;
+};
+
 @ccclass('GameManager')
 export class GameManager extends Component {
 
@@ -68,7 +76,11 @@ export class GameManager extends Component {
 @property({ type: Number, tooltip: "The gap between container panels" })
 public containerSpacing: number = 220;
 @property({ type: Vec3, tooltip: "The starting position of the first container" })
-public containerStartPos: Vec3 = v3(-220, 0, 0)
+public containerStartPos: Vec3 = v3(-220, 0, 0);
+@property({ type: Node, tooltip: "Parent node containing the 5 waiting slots. Auto-found by name 'Waiting' if empty." })
+public waitingBoard: Node | null = null;
+@property({ type: [Node], tooltip: "Waiting slot nodes. Auto-filled from waitingBoard children if empty." })
+public waitingSlots: Node[] = [];
 
     private _zoomGuideActive: boolean = false;
 
@@ -92,13 +104,19 @@ public containerStartPos: Vec3 = v3(-220, 0, 0)
     private isHintInstructionVisible: boolean = false;
     private totalCollectibleCount: number = 0;
     private currentCollectibleCount: number = 0;
+    private activeCollectionContainers: CollectionContainer[] = [];
+    private activeContainerIndex: number = 0;
+    private waitingEntries: WaitingEntry[] = [];
+    private routedItems: Node[] = [];
+    private panelHomePositions: Vec3[] = [];
+    private panelHomeScales: Vec3[] = [];
+    private completedCollectionContainers: CollectionContainer[] = [];
+    private visibleCollectionLanes: (CollectionContainer | null)[] = [];
 
     onLoad() {
-         director.on('REARRANGE_CONTAINERS', this.realignContainers, this);
-    
-    // Position them correctly at the very start
-    this.realignContainers(null, 0); 
+        this.prepareCollectionSystem();
         this.setupEventListeners();
+        director.on(CONTAINER_COMPLETE_EVENT, this.onContainerCompleted, this);
         director.on('PLAYER_ZOOMED', this.hideZoomInstruction, this);
         this.resetGame();
     }
@@ -135,11 +153,16 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 }
     onDestroy() { this.cleanupEventListeners(); }
     private setupEventListeners() { director.on(COLLECT_COIN_EVENT, this.onAnyCoinClicked, this); }
-    private cleanupEventListeners() { director.off(COLLECT_COIN_EVENT, this.onAnyCoinClicked, this); }
+    private cleanupEventListeners() {
+        director.off(COLLECT_COIN_EVENT, this.onAnyCoinClicked, this);
+        director.off(CONTAINER_COMPLETE_EVENT, this.onContainerCompleted, this);
+        director.off('PLAYER_ZOOMED', this.hideZoomInstruction, this);
+    }
 
-    private onAnyCoinClicked(coinNode: Node) {
+    private onAnyCoinClicked(coinNode: Node, spriteFrame: SpriteFrame, worldPos: Vec3) {
 
         if (this.isGameOver) return;
+        if (!coinNode || this.routedItems.indexOf(coinNode) !== -1) return;
         
         // if (CameraPinchZoom.IsBusy) {
         //     console.log("Ignored tap: Camera is busy zooming or panning.");
@@ -149,6 +172,14 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         if (!this.isGameStarted) { this.startGame(); }
         else { this.stopTutorial(); }
 
+        const wasRouted = this.routeTappedItem(coinNode, spriteFrame, worldPos);
+        if (!wasRouted) {
+            const button = coinNode.getComponent(Button);
+            if (button) button.interactable = true;
+            return;
+        }
+
+        this.routedItems.push(coinNode);
         this.idleTimer = 0;
         const index = this.uncollectedCoins.indexOf(coinNode);
         if (index > -1) {
@@ -156,26 +187,16 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         }
 
         this.currentCollectibleCount++;
+        this.totalCoinsCollected++;
+        this.updateMainProgressBar();
+
+        // CHECK FOR FIRST ITEM COLLECTION
         if (this.totalCoinsCollected === 1 && !this._hasShownZoomHint) {
             this.showZoomInstruction();
             this.playZoomAnimation();
         }
 
-        if (this.totalCoinsCollected >= this.totalCollectibleCount) {
-            this.endGame(true);
-        }
-        this.updateMainProgressBar();
-        this.totalCoinsCollected++;
-
-
-        // CHECK FOR FIRST ITEM COLLECTION
-        if (this.totalCoinsCollected === 1 && !this._hasShownZoomHint) {
-            this.showZoomInstruction();
-        }
-
-        if (this.totalCoinsCollected >= this.totalCollectibleCount) {
-            this.endGame(true);
-        }
+        this.checkWinCondition();
     }
     private playZoomAnimation() {
     if (!this.ZoomAnim) return;
@@ -235,9 +256,249 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             })
             .start();
     }
-    private onContainerCompleted() {
+    private onContainerCompleted(container: CollectionContainer) {
         if (this.isGameOver) return;
-        this.completedContainers++;
+        if (this.completedCollectionContainers.indexOf(container) === -1) {
+            this.completedCollectionContainers.push(container);
+            this.completedContainers++;
+        }
+
+        const replacedLaneIndex = this.replaceCompletedLane(container);
+        this.scheduleOnce(() => {
+            this.layoutVisibleContainers(replacedLaneIndex);
+            this.scheduleOnce(() => this.drainWaitingForVisibleContainers(), 0.45);
+            this.checkWinCondition();
+        }, 0.45);
+    }
+
+    private replaceCompletedLane(container: CollectionContainer): number {
+        const laneIndex = this.visibleCollectionLanes.indexOf(container);
+        if (laneIndex === -1) return -1;
+
+        this.visibleCollectionLanes[laneIndex] = this.getNextPendingContainer();
+        return laneIndex;
+    }
+
+    private getNextPendingContainer(): CollectionContainer | null {
+        for (const container of this.activeCollectionContainers) {
+            const isCompleted = this.completedCollectionContainers.indexOf(container) !== -1;
+            const isVisible = this.visibleCollectionLanes.indexOf(container) !== -1;
+            if (!isCompleted && !isVisible) {
+                return container;
+            }
+        }
+        return null;
+    }
+
+    private checkWinCondition() {
+        if (this.isGameOver) return;
+        if (this.completedCollectionContainers.length >= this.activeCollectionContainers.length && this.waitingEntries.length === 0) {
+            this.scheduleOnce(() => this.endGame(true), 0.35);
+        }
+    }
+
+    private prepareCollectionSystem() {
+        this.activeCollectionContainers = this.collectionContainers.filter((container) => {
+            return !!container
+                && !!container.node
+                && container.node.parent?.name === 'UIPanel'
+                && container.getItemCount
+                && container.getItemCount() >= 3;
+        });
+
+        if (!this.waitingBoard) {
+            const canvas = this.node.scene.getChildByName('Canvas');
+            this.waitingBoard = this.findNodeByName(canvas, 'Waiting');
+        }
+
+        if (this.waitingBoard && this.waitingSlots.length === 0) {
+            this.waitingSlots = this.waitingBoard.children.slice(0, 5);
+        }
+
+        this.cachePanelHomeTransforms();
+    }
+
+    private cachePanelHomeTransforms() {
+        this.activeCollectionContainers.slice(0, 2).forEach((container, index) => {
+            if (!container.node || !container.node.isValid) return;
+            if (!this.panelHomePositions[index]) {
+                this.panelHomePositions[index] = container.node.position.clone();
+            }
+            if (!this.panelHomeScales[index]) {
+                this.panelHomeScales[index] = container.node.scale.clone();
+            }
+        });
+    }
+
+    private findNodeByName(root: Node | null, name: string): Node | null {
+        if (!root) return null;
+        if (root.name === name) return root;
+        for (const child of root.children) {
+            const result = this.findNodeByName(child, name);
+            if (result) return result;
+        }
+        return null;
+    }
+
+    private getActiveContainer(): CollectionContainer | null {
+        return this.visibleCollectionLanes[0] || null;
+    }
+
+    private routeTappedItem(coinNode: Node, spriteFrame: SpriteFrame, worldPos: Vec3): boolean {
+        const targetContainer = this.activeCollectionContainers.find(container => container.containsItem(coinNode));
+        if (!targetContainer || !spriteFrame) return false;
+
+        if (this.isContainerVisible(targetContainer)) {
+            return targetContainer.collectItem(coinNode, spriteFrame, worldPos);
+        }
+
+        return this.moveItemToWaitingBoard(coinNode, spriteFrame, worldPos, targetContainer);
+    }
+
+    private isContainerVisible(container: CollectionContainer): boolean {
+        return this.visibleCollectionLanes.indexOf(container) !== -1;
+    }
+
+    private moveItemToWaitingBoard(coinNode: Node, spriteFrame: SpriteFrame, worldPos: Vec3, targetContainer: CollectionContainer): boolean {
+        const slotNode = this.getFreeWaitingSlot();
+        if (!slotNode) {
+            const button = coinNode.getComponent(Button);
+            if (button) button.interactable = true;
+            return false;
+        }
+
+        coinNode.getComponent(CollectibleCoin)?.onCollectionStart();
+        const displayNode = this.createWaitingDisplay(spriteFrame, worldPos, slotNode);
+        this.waitingEntries.push({ itemNode: coinNode, spriteFrame, displayNode, slotNode, container: targetContainer });
+        return true;
+    }
+
+    private getFreeWaitingSlot(): Node | null {
+        return this.waitingSlots.find(slot => {
+            return !!slot && this.waitingEntries.every(entry => entry.slotNode !== slot);
+        }) || null;
+    }
+
+    private createWaitingDisplay(spriteFrame: SpriteFrame, startWorldPos: Vec3, slotNode: Node): Node {
+        const canvas = this.node.scene.getChildByName('Canvas');
+        const displayNode = new Node('WaitingItem');
+        const displayUIT = displayNode.addComponent(UITransform);
+        const sprite = displayNode.addComponent(Sprite);
+        sprite.spriteFrame = spriteFrame;
+        this.copyWaitingVisualSize(spriteFrame, displayUIT, sprite);
+        const slotScale = this.getWaitingFitScale(spriteFrame, slotNode);
+        displayNode.setScale(slotScale);
+
+        if (!canvas) {
+            slotNode.addChild(displayNode);
+            displayNode.setPosition(Vec3.ZERO);
+            return displayNode;
+        }
+
+        canvas.addChild(displayNode);
+        const canvasUIT = canvas.getComponent(UITransform)!;
+        displayNode.setPosition(canvasUIT.convertToNodeSpaceAR(startWorldPos));
+        const targetLocalPos = canvasUIT.convertToNodeSpaceAR(slotNode.worldPosition);
+
+        tween(displayNode)
+            .to(0.45, { position: targetLocalPos, scale: slotScale }, { easing: 'sineInOut' })
+            .call(() => {
+                if (!displayNode.isValid || !slotNode.isValid) return;
+                displayNode.setParent(slotNode, true);
+                displayNode.setPosition(Vec3.ZERO);
+                displayNode.setScale(slotScale);
+                tween(slotNode)
+                    .to(0.1, { scale: v3(1.1, 1.1, 1) }, { easing: 'quadOut' })
+                    .to(0.18, { scale: Vec3.ONE }, { easing: 'backOut' })
+                    .start();
+            })
+            .start();
+
+        return displayNode;
+    }
+
+    private copyWaitingVisualSize(spriteFrame: SpriteFrame, targetUIT: UITransform, sprite: Sprite) {
+        const rect = spriteFrame.rect;
+        targetUIT.setContentSize(rect.width, rect.height);
+        (sprite as any).sizeMode = Sprite.SizeMode.CUSTOM;
+    }
+
+    private getWaitingFitScale(spriteFrame: SpriteFrame, slotNode: Node): Vec3 {
+        const slotUIT = slotNode.getComponent(UITransform);
+        const rect = spriteFrame.rect;
+
+        if (!slotUIT || rect.width <= 0 || rect.height <= 0) {
+            return v3(1, 1, 1);
+        }
+
+        const widthFit = (slotUIT.contentSize.width * 0.82) / rect.width;
+        const heightFit = (slotUIT.contentSize.height * 0.82) / rect.height;
+        const fit = Math.min(widthFit, heightFit);
+        return v3(fit, fit, 1);
+    }
+
+    private drainWaitingForVisibleContainers() {
+        if (this.isGameOver) return;
+        const visibleContainers = this.visibleCollectionLanes.filter((container): container is CollectionContainer => !!container);
+
+        const entry = this.waitingEntries
+            .filter(waitingEntry => visibleContainers.indexOf(waitingEntry.container) !== -1)
+            .sort((a, b) => {
+                const containerOrder = visibleContainers.indexOf(a.container) - visibleContainers.indexOf(b.container);
+                if (containerOrder !== 0) return containerOrder;
+                return a.container.getSlotIndexForItem(a.itemNode) - b.container.getSlotIndexForItem(b.itemNode);
+            })[0];
+
+        if (!entry || !entry.displayNode || !entry.displayNode.isValid) return;
+
+        const startWorldPos = entry.displayNode.worldPosition.clone();
+        const accepted = entry.container.collectItem(
+            entry.itemNode,
+            entry.spriteFrame,
+            startWorldPos,
+            false,
+            entry.displayNode,
+            () => {
+                const entryIndex = this.waitingEntries.indexOf(entry);
+                if (entryIndex > -1) this.waitingEntries.splice(entryIndex, 1);
+                this.scheduleOnce(() => this.drainWaitingForVisibleContainers(), 0.15);
+            }
+        );
+
+        if (!accepted) {
+            const entryIndex = this.waitingEntries.indexOf(entry);
+            if (entryIndex > -1) this.waitingEntries.splice(entryIndex, 1);
+        }
+    }
+
+    private layoutVisibleContainers(animatedLaneIndex: number = -1) {
+        this.activeCollectionContainers.forEach((container, index) => {
+            const panelNode = container.node;
+            const visibleIndex = this.visibleCollectionLanes.indexOf(container);
+            const opacity = panelNode.getComponent(UIOpacity) || panelNode.addComponent(UIOpacity);
+            const homePosition = this.panelHomePositions[visibleIndex] || panelNode.position.clone();
+            const homeScale = this.panelHomeScales[visibleIndex] || panelNode.scale.clone();
+
+            if (visibleIndex < 0) {
+                panelNode.active = false;
+                return;
+            }
+
+            panelNode.active = true;
+            opacity.opacity = 255;
+
+            if (visibleIndex === animatedLaneIndex) {
+                panelNode.setPosition(homePosition.x, homePosition.y + 120, homePosition.z);
+                panelNode.setScale(v3(homeScale.x * 0.94, homeScale.y * 0.94, homeScale.z));
+                tween(panelNode)
+                    .to(0.45, { position: homePosition, scale: homeScale }, { easing: 'backOut' })
+                    .start();
+            } else {
+                tween(panelNode)
+                    .to(0.25, { position: homePosition, scale: homeScale }, { easing: 'expoOut' })
+                    .start();
+            }
+        });
     }
 
     private startGame() {
@@ -372,6 +633,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
     }
 
     public resetGame() {
+        this.prepareCollectionSystem();
         if (this.backgroundMusic) { this.backgroundMusic.stop(); }
         if (this.endScreenPanel) { this.endScreenPanel.active = false; }
         if (this.highlightOverlay) { this.highlightOverlay.active = false; }
@@ -381,15 +643,28 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
         this.isGameStarted = false; this.isGameOver = false; this.isHintActive = false;
         this.totalCoinsCollected = 0; this.currentTime = this.gameDuration;
+        this.activeContainerIndex = 0;
+        this.routedItems.length = 0;
+        this.completedCollectionContainers.length = 0;
+        this.visibleCollectionLanes = [
+            this.activeCollectionContainers[0] || null,
+            this.activeCollectionContainers[1] || null
+        ];
+        this.clearWaitingBoard();
 
         this.completedContainers = 0;
-        this.totalContainers = this.collectionContainers.length;
+        this.totalContainers = this.activeCollectionContainers.length;
 
         if (this.timerLabel) this.timerLabel.node.active = true;
         if (this.ctaButton) this.ctaButton.interactable = true;
 
         this.updateGameTimer(0);
-        this.collectionContainers.forEach(container => container.resetContainer());
+        this.collectionContainers.forEach(container => {
+            if (container && container.node && container.node.isValid) {
+                container.resetContainer();
+            }
+        });
+        this.allCollectibleItems = this.getUniqueCollectibleItems();
         this.allCollectibleItems.forEach(itemNode => {
             itemNode.getComponent(CollectibleCoin)?.resetCoin();
             const button = itemNode.getComponent(Button);
@@ -402,8 +677,36 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
         this.idleTimer = 0;
         this.uncollectedCoins = [...this.allCollectibleItems];
+        this.layoutVisibleContainers(-1);
+        this.drainWaitingForVisibleContainers();
         this.stopTutorial();
         this.scheduleOnce(() => { this.triggerTutorial(); }, 0);
+    }
+
+    private getUniqueCollectibleItems(): Node[] {
+        const uniqueItems: Node[] = [];
+        this.activeCollectionContainers.forEach((container) => {
+            container.collectibleItems.forEach((itemNode) => {
+                if (itemNode && itemNode.isValid && uniqueItems.indexOf(itemNode) === -1) {
+                    uniqueItems.push(itemNode);
+                }
+            });
+        });
+        return uniqueItems.length > 0 ? uniqueItems : this.allCollectibleItems;
+    }
+
+    private clearWaitingBoard() {
+        this.waitingEntries.forEach((entry) => {
+            if (entry.displayNode && entry.displayNode.isValid) entry.displayNode.destroy();
+        });
+        this.waitingEntries.length = 0;
+        this.waitingSlots.forEach((slot) => {
+            if (!slot || !slot.isValid) return;
+            slot.children
+                .filter(child => child.name === 'WaitingItem')
+                .forEach(child => child.destroy());
+            slot.setScale(Vec3.ONE);
+        });
     }
   private updateGameTimer(deltaTime: number) { 
     if (this.isGameStarted) { 
