@@ -41,6 +41,7 @@ public completionCheckmark: Node | null = null; // A green checkmark or 'Done' t
     private originalScale: Vec3 = new Vec3(1, 1, 1);
     private collectedItemNodes: Node[] = [];
     private checkmarkNodes: Node[] = [];
+    private placedVisualNodes: Node[] = [];
     private slotOriginalScales: Vec3[] = [];
 
     onLoad() {
@@ -62,7 +63,7 @@ public completionCheckmark: Node | null = null; // A green checkmark or 'Done' t
     }
 
     public getSlotIndexForItem(itemNode: Node): number {
-        return this.getOrderedItems().indexOf(itemNode);
+        return (this.collectibleItems || []).indexOf(itemNode);
     }
 
     public collectItem(
@@ -75,10 +76,13 @@ public completionCheckmark: Node | null = null; // A green checkmark or 'Done' t
     ): boolean {
         if (this.isComplete || !itemNode || !spriteFrame) return false;
 
-        const slotIndex = this.getSlotIndexForItem(itemNode);
-        if (slotIndex === -1 || this.collectedItemNodes.indexOf(itemNode) !== -1) {
+        const itemIndex = this.getSlotIndexForItem(itemNode);
+        if (itemIndex === -1 || this.collectedItemNodes.indexOf(itemNode) !== -1) {
             return false;
         }
+
+        const slotIndex = this.getNextPlacementSlotIndex();
+        if (slotIndex === -1) return false;
 
         if (hideSourceItem) {
             itemNode.getComponent(CollectibleCoin)?.onCollectionStart();
@@ -89,6 +93,11 @@ public completionCheckmark: Node | null = null; // A green checkmark or 'Done' t
 
         this.playCollectionEffects(itemNode, spriteFrame, worldPos, slotIndex, sourceDisplayNode, onPlaced);
         return true;
+    }
+
+    private getNextPlacementSlotIndex(): number {
+        const slotCount = Math.max(this.targetSlots.length, this.node.children.length, this.getOrderedItems().length);
+        return this.collectedItemNodes.length < slotCount ? this.collectedItemNodes.length : -1;
     }
 
     private getOrderedItems(): Node[] {
@@ -227,21 +236,36 @@ private copyVisualSize(sizeSourceNode: Node, targetUIT: UITransform, sprite: Spr
 }
 
 private settleItemInSlot(targetSlot: Node, spriteFrame: SpriteFrame, slotIndex: number) {
-    const targetSprite = targetSlot.getComponent(Sprite);
-    if (targetSprite) {
-        targetSprite.spriteFrame = spriteFrame;
-        targetSprite.enabled = true;
-    }
+    const visualNode = this.createSlotVisual(targetSlot, spriteFrame, slotIndex);
     const originalSlotScale = this.slotOriginalScales[slotIndex] || targetSlot.scale.clone();
     this.slotOriginalScales[slotIndex] = originalSlotScale.clone();
     targetSlot.active = true;
-    targetSlot.setScale(v3(originalSlotScale.x * 0.92, originalSlotScale.y * 0.92, originalSlotScale.z));
-    tween(targetSlot)
-        .to(0.18, { scale: v3(originalSlotScale.x * 1.08, originalSlotScale.y * 1.08, originalSlotScale.z) }, { easing: 'quadOut' })
-        .to(0.22, { scale: originalSlotScale }, { easing: 'backOut' })
+    visualNode.setScale(v3(0.86, 0.86, 1));
+    tween(visualNode)
+        .to(0.18, { scale: v3(1.08, 1.08, 1) }, { easing: 'quadOut' })
+        .to(0.22, { scale: Vec3.ONE }, { easing: 'backOut' })
         .start();
 
     this.showSlotCheckmark(targetSlot, slotIndex);
+}
+
+private createSlotVisual(targetSlot: Node, spriteFrame: SpriteFrame, slotIndex: number): Node {
+    if (this.placedVisualNodes[slotIndex] && this.placedVisualNodes[slotIndex].isValid) {
+        this.placedVisualNodes[slotIndex].destroy();
+    }
+
+    const visualNode = new Node(`CollectedItemVisual-${slotIndex + 1}`);
+    targetSlot.addChild(visualNode);
+    visualNode.setPosition(Vec3.ZERO);
+
+    const visualUIT = visualNode.addComponent(UITransform);
+    const visualSprite = visualNode.addComponent(Sprite);
+    visualSprite.spriteFrame = spriteFrame;
+    this.copyVisualSize(targetSlot, visualUIT, visualSprite);
+    visualSprite.enabled = true;
+
+    this.placedVisualNodes[slotIndex] = visualNode;
+    return visualNode;
 }
 
 private showSlotCheckmark(targetSlot: Node, slotIndex: number) {
@@ -249,6 +273,9 @@ private showSlotCheckmark(targetSlot: Node, slotIndex: number) {
         this.checkmarkNodes[slotIndex].active = true;
         return;
     }
+
+    this.createClearSlotCheckmark(targetSlot, slotIndex);
+    return;
 
     const checkNode = new Node(`Checkmark-${slotIndex + 1}`);
     targetSlot.addChild(checkNode);
@@ -276,6 +303,49 @@ private showSlotCheckmark(targetSlot: Node, slotIndex: number) {
     this.checkmarkNodes[slotIndex] = checkNode;
     tween(checkNode)
         .to(0.18, { scale: v3(1.25, 1.25, 1) }, { easing: 'backOut' })
+        .to(0.12, { scale: Vec3.ONE }, { easing: 'quadOut' })
+        .start();
+}
+
+private createClearSlotCheckmark(targetSlot: Node, slotIndex: number) {
+    const checkNode = new Node(`Checkmark-${slotIndex + 1}`);
+    targetSlot.addChild(checkNode);
+    checkNode.addComponent(UITransform).setContentSize(54, 42);
+    checkNode.setPosition(0, -34, 0);
+    checkNode.setScale(v3(0, 0, 1));
+
+    const back = new Node('CheckBack');
+    checkNode.addChild(back);
+    const backLabel = back.addComponent(Label);
+    backLabel.string = '✓';
+    backLabel.fontSize = 46;
+    backLabel.lineHeight = 46;
+    backLabel.isBold = true;
+    backLabel.color = new Color(119, 77, 0, 255);
+
+    const middle = new Node('CheckMiddle');
+    checkNode.addChild(middle);
+    middle.setPosition(0, 1.5, 0);
+    const middleLabel = middle.addComponent(Label);
+    middleLabel.string = '✓';
+    middleLabel.fontSize = 41;
+    middleLabel.lineHeight = 41;
+    middleLabel.isBold = true;
+    middleLabel.color = new Color(255, 143, 0, 255);
+
+    const front = new Node('CheckFront');
+    checkNode.addChild(front);
+    front.setPosition(0, 3, 0);
+    const frontLabel = front.addComponent(Label);
+    frontLabel.string = '✓';
+    frontLabel.fontSize = 36;
+    frontLabel.lineHeight = 36;
+    frontLabel.isBold = true;
+    frontLabel.color = new Color(255, 246, 72, 255);
+
+    this.checkmarkNodes[slotIndex] = checkNode;
+    tween(checkNode)
+        .to(0.18, { scale: v3(1.3, 1.3, 1) }, { easing: 'backOut' })
         .to(0.12, { scale: Vec3.ONE }, { easing: 'quadOut' })
         .start();
 }
@@ -384,6 +454,10 @@ private onContainerComplete() {
             if (node && node.isValid) node.destroy();
         });
         this.checkmarkNodes.length = 0;
+        this.placedVisualNodes.forEach((node) => {
+            if (node && node.isValid) node.destroy();
+        });
+        this.placedVisualNodes.length = 0;
         const opacity = this.node.getComponent(UIOpacity) || this.node.addComponent(UIOpacity);
         opacity.opacity = 255;
         this.node.setScale(this.originalScale);
