@@ -48,6 +48,7 @@ public completionCheckmark: Node | null = null; // A green checkmark or 'Done' t
         this.totalItems = this.getOrderedItems().length;
         this.updateUI();
         this.originalScale.set(this.node.scale); // Store the panel's original scale
+        this.resetTargetSlotOpacities();
     }
 
     onDestroy() {
@@ -106,12 +107,31 @@ public completionCheckmark: Node | null = null; // A green checkmark or 'Done' t
 
     private getTargetSlot(slotIndex: number): Node | null {
         const explicitSlot = this.targetSlots && this.targetSlots[slotIndex];
-        if (explicitSlot && explicitSlot.isValid) return explicitSlot;
+        if (explicitSlot && explicitSlot.isValid) {
+            this.setSlotOpacity(explicitSlot, 150);
+            return explicitSlot;
+        }
 
         const childSlot = this.node.children[slotIndex];
-        if (childSlot && childSlot.isValid) return childSlot;
+        if (childSlot && childSlot.isValid) {
+            this.setSlotOpacity(childSlot, 150);
+            return childSlot;
+        }
 
         return this.createRuntimeSlot(slotIndex);
+    }
+
+    private setSlotOpacity(slotNode: Node, opacity: number) {
+        const opacityComp = slotNode.getComponent(UIOpacity) || slotNode.addComponent(UIOpacity);
+        opacityComp.opacity = opacity;
+    }
+
+    private resetTargetSlotOpacities() {
+        const slots = this.targetSlots.filter((slot): slot is Node => !!slot && slot.isValid);
+        const fallbackSlots = this.node.children.filter((child): child is Node => !!child && child.isValid);
+        const allSlots = slots.length > 0 ? slots : fallbackSlots;
+
+        allSlots.forEach((slot) => this.setSlotOpacity(slot, 150));
     }
 
     private createRuntimeSlot(slotIndex: number): Node {
@@ -240,6 +260,7 @@ private settleItemInSlot(targetSlot: Node, spriteFrame: SpriteFrame, slotIndex: 
     const originalSlotScale = this.slotOriginalScales[slotIndex] || targetSlot.scale.clone();
     this.slotOriginalScales[slotIndex] = originalSlotScale.clone();
     targetSlot.active = true;
+    this.setSlotOpacity(targetSlot, 255);
     visualNode.setScale(v3(0.86, 0.86, 1));
     tween(visualNode)
         .to(0.18, { scale: v3(1.08, 1.08, 1) }, { easing: 'quadOut' })
@@ -458,6 +479,7 @@ private onContainerComplete() {
             if (node && node.isValid) node.destroy();
         });
         this.placedVisualNodes.length = 0;
+        this.resetTargetSlotOpacities();
         const opacity = this.node.getComponent(UIOpacity) || this.node.addComponent(UIOpacity);
         opacity.opacity = 255;
         this.node.setScale(this.originalScale);

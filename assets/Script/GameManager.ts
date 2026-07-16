@@ -90,6 +90,8 @@ public introBackgroundNode: Node | null = null;
 public gameplayRootNode: Node | null = null;
 @property({ type: [Node], tooltip: "Optional decorative top stack nodes. Auto-found as Stack 1 and Stack 2 if empty." })
 public stackFrameNodes: Node[] = [];
+@property({ type: Node, tooltip: "Packed reveal node. Auto-found by name 'Packed' if empty." })
+public packedNode: Node | null = null;
 @property({ type: Number, tooltip: "Delay before the reveal intro starts." })
 public introStartDelay: number = 0.15;
 @property({ type: Number, tooltip: "Extra delay after reveal before tutorial appears." })
@@ -114,6 +116,8 @@ public waitingAutoFlyDelay: number = 0.58;
     private handTween: Tween<Node> | null = null;
     private coinTween: Tween<Node> | null = null;
     private glowTween: Tween<Node> | null = null;
+    private tutorialPulseTween: Tween<Node> | null = null;
+    private tutorialPulseContainer: CollectionContainer | null = null;
     private isHintActive: boolean = false;
     private totalCoinsCollected: number = 0;
     private isHintInstructionVisible: boolean = false;
@@ -284,6 +288,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         }
 
         const replacedLaneIndex = this.replaceCompletedLane(container);
+        this.revealPackedStack(replacedLaneIndex);
         this.scheduleOnce(() => {
             const hasNewPanel = this.layoutVisibleContainers(replacedLaneIndex);
             const waitDelay = hasNewPanel ? 0.56 + this.waitingAutoFlyDelay : this.waitingAutoFlyDelay;
@@ -311,9 +316,62 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         return null;
     }
 
+    private revealPackedStack(laneIndex: number) {
+        const stackNode = this.stackFrameNodes[laneIndex] || this.stackFrameNodes[0] || null;
+        const packedNode = this.packedNode;
+        if (!stackNode || !packedNode || !packedNode.isValid || !stackNode.isValid) return;
+
+        const stackOpacity = stackNode.getComponent(UIOpacity) || stackNode.addComponent(UIOpacity);
+        const packedOpacity = packedNode.getComponent(UIOpacity) || packedNode.addComponent(UIOpacity);
+        const stackStartPos = stackNode.position.clone();
+        const packedStartScale = packedNode.scale.clone();
+
+        stackNode.active = true;
+        stackNode.setPosition(stackStartPos);
+        stackOpacity.opacity = 255;
+
+        packedNode.active = true;
+        packedNode.setPosition(stackStartPos);
+        packedNode.setScale(packedStartScale);
+        packedOpacity.opacity = 0;
+
+        tween(packedOpacity)
+            .to(0.18, { opacity: 255 }, { easing: 'linear' })
+            .delay(0.12)
+            .to(0.18, { opacity: 0 }, { easing: 'linear' })
+            .call(() => {
+                if (packedNode.isValid) {
+                    packedNode.active = false;
+                }
+                if (stackNode.isValid) {
+                    stackNode.active = true;
+                    stackNode.setPosition(stackStartPos);
+                    stackOpacity.opacity = 255;
+                }
+            })
+            .start();
+    }
+
+    private hideStackVisuals() {
+        this.stackFrameNodes.forEach((node) => {
+            if (!node || !node.isValid) return;
+            tween(node)
+                .to(0.18, { scale: v3(0.6, 0.6, 1) }, { easing: 'quadIn' })
+                .call(() => {
+                    node.active = false;
+                })
+                .start();
+        });
+
+        if (this.packedNode && this.packedNode.isValid) {
+            this.packedNode.active = false;
+        }
+    }
+
     private checkWinCondition() {
         if (this.isGameOver) return;
         if (this.completedCollectionContainers.length >= this.activeCollectionContainers.length && this.waitingEntries.length === 0) {
+            this.hideStackVisuals();
             this.scheduleOnce(() => this.endGame(true), 0.35);
         }
     }
@@ -349,6 +407,11 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             const stack1 = this.findNodeByName(canvas, 'Stack 1');
             const stack2 = this.findNodeByName(canvas, 'Stack 2');
             this.stackFrameNodes = [stack1, stack2].filter((node): node is Node => !!node);
+        }
+
+        if (!this.packedNode) {
+            const canvas = this.node.scene.getChildByName('Canvas');
+            this.packedNode = this.findNodeByName(canvas, 'Packed');
         }
 
         this.cachePanelHomeTransforms();
@@ -929,6 +992,11 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
     private playTapTutorial(targetNode: Node, showInstruction: boolean) {
         if (!this.highlightOverlay || !this.tutorialHintGlow || !this.tutorialHintCoin || !targetNode?.isValid) { return; }
 
+        this.stopTutorialContainerPulse();
+        const tutorialContainer = this.activeCollectionContainers.find(container => container.containsItem(targetNode)) || null;
+        this.tutorialPulseContainer = tutorialContainer;
+        this.pulseTutorialContainer(tutorialContainer);
+
         this.highlightOverlay.active = true;
         const overlayOpacity = this.highlightOverlay.getComponent(UIOpacity);
         if (overlayOpacity) {
@@ -965,6 +1033,39 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             this.handNode.setScale(v3(0, 0, 1));
         }
         this.runTapAnimationLoop(targetNode);
+    }
+
+    private pulseTutorialContainer(container: CollectionContainer | null) {
+        if (!container || !container.node || !container.node.isValid) return;
+
+        const node = container.node;
+        const laneIndex = this.visibleCollectionLanes.indexOf(container);
+        const baseScale = this.panelHomeScales[laneIndex] || node.scale.clone();
+        const pulseScale = v3(baseScale.x * 1.06, baseScale.y * 1.06, baseScale.z);
+
+        node.setScale(baseScale);
+        this.tutorialPulseTween = tween(node)
+            .to(0.5, { scale: pulseScale }, { easing: 'sineInOut' })
+            .to(0.5, { scale: baseScale }, { easing: 'sineInOut' })
+            .union()
+            .repeatForever()
+            .start();
+    }
+
+    private stopTutorialContainerPulse() {
+        if (this.tutorialPulseTween) {
+            this.tutorialPulseTween.stop();
+            this.tutorialPulseTween = null;
+        }
+
+        if (this.tutorialPulseContainer && this.tutorialPulseContainer.node && this.tutorialPulseContainer.node.isValid) {
+            const laneIndex = this.visibleCollectionLanes.indexOf(this.tutorialPulseContainer);
+            const node = this.tutorialPulseContainer.node;
+            const baseScale = this.panelHomeScales[laneIndex] || node.scale.clone();
+            node.setScale(baseScale);
+        }
+
+        this.tutorialPulseContainer = null;
     }
 
     // --- MODIFIED FUNCTION ---
@@ -1097,6 +1198,7 @@ private getTutorialGlowScale(target: Node, multiplier: number = 1): Vec3 {
 
     private stopTutorial() {
         this.isHintActive = false;
+        this.stopTutorialContainerPulse();
         if (this.handTween) { this.handTween.stop(); this.handTween = null; }
         if (this.coinTween) { this.coinTween.stop(); this.coinTween = null; }
         if (this.glowTween) { this.glowTween.stop(); this.glowTween = null; }
