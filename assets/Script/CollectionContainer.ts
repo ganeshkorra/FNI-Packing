@@ -317,7 +317,7 @@ private createClearSlotCheckmark(targetSlot: Node, slotIndex: number) {
     const back = new Node('CheckBack');
     checkNode.addChild(back);
     const backLabel = back.addComponent(Label);
-    backLabel.string = '✓';
+    backLabel.string = '\u2713';
     backLabel.fontSize = 46;
     backLabel.lineHeight = 46;
     backLabel.isBold = true;
@@ -327,7 +327,7 @@ private createClearSlotCheckmark(targetSlot: Node, slotIndex: number) {
     checkNode.addChild(middle);
     middle.setPosition(0, 1.5, 0);
     const middleLabel = middle.addComponent(Label);
-    middleLabel.string = '✓';
+    middleLabel.string = '\u2713';
     middleLabel.fontSize = 41;
     middleLabel.lineHeight = 41;
     middleLabel.isBold = true;
@@ -337,7 +337,7 @@ private createClearSlotCheckmark(targetSlot: Node, slotIndex: number) {
     checkNode.addChild(front);
     front.setPosition(0, 3, 0);
     const frontLabel = front.addComponent(Label);
-    frontLabel.string = '✓';
+    frontLabel.string = '\u2713';
     frontLabel.fontSize = 36;
     frontLabel.lineHeight = 36;
     frontLabel.isBold = true;

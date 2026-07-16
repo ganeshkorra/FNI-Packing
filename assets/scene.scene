@@ -7071,7 +7071,7 @@
     "_spriteFrame": null,
     "_type": 0,
     "_fillType": 0,
-    "_sizeMode": 1,
+    "_sizeMode": 0,
     "_fillCenter": {
       "__type__": "cc.Vec2",
       "x": 0,
@@ -8955,6 +8955,12 @@
         "__id__": 27
       }
     ],
+    "introBackgroundNode": null,
+    "gameplayRootNode": null,
+    "stackFrameNodes": [],
+    "introStartDelay": 0.15,
+    "tutorialAfterIntroDelay": 0.25,
+    "waitingAutoFlyDelay": 0.28,
     "_id": "96/Att6zZDuqNbF494SIi1"
   },
   {

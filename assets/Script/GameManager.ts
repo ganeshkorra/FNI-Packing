@@ -83,6 +83,18 @@ public containerStartPos: Vec3 = v3(-220, 0, 0);
 public waitingBoard: Node | null = null;
 @property({ type: [Node], tooltip: "Waiting slot nodes. Auto-filled from waitingBoard children if empty." })
 public waitingSlots: Node[] = [];
+@property({ type: Node, tooltip: "Optional full background plate. Auto-found by name 'Background' if empty." })
+public introBackgroundNode: Node | null = null;
+@property({ type: Node, tooltip: "Optional gameplay scene art root. Auto-found by name 'BG' if empty." })
+public gameplayRootNode: Node | null = null;
+@property({ type: [Node], tooltip: "Optional decorative top stack nodes. Auto-found as Stack 1 and Stack 2 if empty." })
+public stackFrameNodes: Node[] = [];
+@property({ type: Number, tooltip: "Delay before the reveal intro starts." })
+public introStartDelay: number = 0.15;
+@property({ type: Number, tooltip: "Extra delay after reveal before tutorial appears." })
+public tutorialAfterIntroDelay: number = 0.25;
+@property({ type: Number, tooltip: "Delay after a new collection panel becomes active before matching waiting items fly." })
+public waitingAutoFlyDelay: number = 0.58;
 
     private _zoomGuideActive: boolean = false;
 
@@ -114,6 +126,8 @@ public waitingSlots: Node[] = [];
     private panelHomeScales: Vec3[] = [];
     private completedCollectionContainers: CollectionContainer[] = [];
     private visibleCollectionLanes: (CollectionContainer | null)[] = [];
+    private introHomeScales: Map<Node, Vec3> = new Map();
+    private isIntroPlaying: boolean = false;
 
     onLoad() {
         this.prepareCollectionSystem();
@@ -163,7 +177,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
     private onAnyCoinClicked(coinNode: Node, spriteFrame: SpriteFrame, worldPos: Vec3) {
 
-        if (this.isGameOver) return;
+        if (this.isGameOver || this.isIntroPlaying) return;
         if (!coinNode || this.routedItems.indexOf(coinNode) !== -1) return;
         
         // if (CameraPinchZoom.IsBusy) {
@@ -267,8 +281,9 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
         const replacedLaneIndex = this.replaceCompletedLane(container);
         this.scheduleOnce(() => {
-            this.layoutVisibleContainers(replacedLaneIndex);
-            this.scheduleOnce(() => this.drainWaitingForVisibleContainers(), 0.45);
+            const hasNewPanel = this.layoutVisibleContainers(replacedLaneIndex);
+            const waitDelay = hasNewPanel ? 0.56 + this.waitingAutoFlyDelay : this.waitingAutoFlyDelay;
+            this.scheduleOnce(() => this.drainWaitingForVisibleContainers(), waitDelay);
             this.checkWinCondition();
         }, 0.45);
     }
@@ -315,6 +330,21 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
         if (this.waitingBoard && this.waitingSlots.length === 0) {
             this.waitingSlots = this.waitingBoard.children.slice(0, 5);
+        }
+
+        if (!this.introBackgroundNode) {
+            const canvas = this.node.scene.getChildByName('Canvas');
+            this.introBackgroundNode = this.findNodeByName(canvas, 'Background');
+        }
+        if (!this.gameplayRootNode) {
+            const canvas = this.node.scene.getChildByName('Canvas');
+            this.gameplayRootNode = this.findNodeByName(canvas, 'BG');
+        }
+        if (this.stackFrameNodes.length === 0) {
+            const canvas = this.node.scene.getChildByName('Canvas');
+            const stack1 = this.findNodeByName(canvas, 'Stack 1');
+            const stack2 = this.findNodeByName(canvas, 'Stack 2');
+            this.stackFrameNodes = [stack1, stack2].filter((node): node is Node => !!node);
         }
 
         this.cachePanelHomeTransforms();
@@ -448,7 +478,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             .sort((a, b) => {
                 const containerOrder = visibleContainers.indexOf(a.container) - visibleContainers.indexOf(b.container);
                 if (containerOrder !== 0) return containerOrder;
-                return a.container.getSlotIndexForItem(a.itemNode) - b.container.getSlotIndexForItem(b.itemNode);
+                return this.waitingEntries.indexOf(a) - this.waitingEntries.indexOf(b);
             })[0];
 
         if (!entry || !entry.displayNode || !entry.displayNode.isValid) return;
@@ -473,7 +503,8 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         }
     }
 
-    private layoutVisibleContainers(animatedLaneIndex: number = -1) {
+    private layoutVisibleContainers(animatedLaneIndex: number = -1): boolean {
+        let animatedNewPanel = false;
         this.activeCollectionContainers.forEach((container, index) => {
             const panelNode = container.node;
             const visibleIndex = this.visibleCollectionLanes.indexOf(container);
@@ -490,6 +521,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             opacity.opacity = 255;
 
             if (visibleIndex === animatedLaneIndex) {
+                animatedNewPanel = true;
                 panelNode.setPosition(homePosition.x, homePosition.y + 120, homePosition.z);
                 panelNode.setScale(v3(homeScale.x * 0.94, homeScale.y * 0.94, homeScale.z));
                 tween(panelNode)
@@ -501,6 +533,8 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
                     .start();
             }
         });
+
+        return animatedNewPanel;
     }
 
     private startGame() {
@@ -682,7 +716,79 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         this.layoutVisibleContainers(-1);
         this.drainWaitingForVisibleContainers();
         this.stopTutorial();
-        this.scheduleOnce(() => { this.triggerTutorial(); }, this.tutorialStartDelay);
+        this.playIntroReveal();
+    }
+
+    private playIntroReveal() {
+        this.isIntroPlaying = true;
+        const backgroundNodes = [this.introBackgroundNode, this.gameplayRootNode].filter((node): node is Node => !!node && node.isValid);
+        const stackNodes = this.stackFrameNodes.filter((node): node is Node => !!node && node.isValid);
+        const collectionNodes = this.visibleCollectionLanes
+            .filter((container): container is CollectionContainer => !!container && !!container.node && container.node.isValid)
+            .map(container => container.node);
+        const waitingNode = this.waitingBoard && this.waitingBoard.isValid ? this.waitingBoard : null;
+        const revealNodes = [...stackNodes, ...collectionNodes, ...(waitingNode ? [waitingNode] : [])];
+
+        backgroundNodes.forEach(node => this.prepareFadeNode(node, 0));
+        revealNodes.forEach(node => this.preparePopNode(node));
+
+        tween(this.node)
+            .delay(this.introStartDelay)
+            .call(() => {
+                backgroundNodes.forEach((node, index) => this.fadeNode(node, 255, 0.42 + index * 0.08));
+            })
+            .delay(0.34)
+            .call(() => {
+                revealNodes.forEach((node, index) => this.revealPopNode(node, index * 0.09));
+            })
+            .delay(0.68 + revealNodes.length * 0.03)
+            .call(() => {
+                this.isIntroPlaying = false;
+                this.scheduleOnce(() => this.triggerTutorial(), this.tutorialStartDelay + this.tutorialAfterIntroDelay);
+            })
+            .start();
+    }
+
+    private prepareFadeNode(node: Node, opacity: number) {
+        node.active = true;
+        const nodeOpacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+        nodeOpacity.opacity = opacity;
+    }
+
+    private fadeNode(node: Node, opacity: number, duration: number) {
+        const nodeOpacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+        tween(nodeOpacity).to(duration, { opacity }, { easing: 'sineOut' }).start();
+    }
+
+    private preparePopNode(node: Node) {
+        node.active = true;
+        const homeScale = this.getIntroHomeScale(node);
+        const nodeOpacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+        nodeOpacity.opacity = 0;
+        node.setScale(v3(homeScale.x * 0.72, homeScale.y * 0.72, homeScale.z));
+    }
+
+    private revealPopNode(node: Node, delay: number) {
+        const homeScale = this.getIntroHomeScale(node);
+        const nodeOpacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+        tween(nodeOpacity).delay(delay).to(0.22, { opacity: 255 }, { easing: 'quadOut' }).start();
+        tween(node)
+            .delay(delay)
+            .to(0.26, { scale: v3(homeScale.x * 1.12, homeScale.y * 1.12, homeScale.z) }, { easing: 'backOut' })
+            .to(0.18, { scale: homeScale }, { easing: 'sineOut' })
+            .start();
+    }
+
+    private getIntroHomeScale(node: Node): Vec3 {
+        const laneIndex = this.visibleCollectionLanes.findIndex(container => container?.node === node);
+        if (laneIndex !== -1 && this.panelHomeScales[laneIndex]) {
+            return this.panelHomeScales[laneIndex].clone();
+        }
+
+        if (!this.introHomeScales.has(node)) {
+            this.introHomeScales.set(node, node.scale.clone());
+        }
+        return this.introHomeScales.get(node)!.clone();
     }
 
     private getUniqueCollectibleItems(): Node[] {
