@@ -114,6 +114,7 @@ public waitingAutoFlyDelay: number = 0.58;
     private uncollectedCoins: Node[] = [];
     private completedContainers: number = 0;
     private totalContainers: number = 0;
+    private hasShownMidgameCTA: boolean = false;
     private handTween: Tween<Node> | null = null;
     private coinTween: Tween<Node> | null = null;
     private glowTween: Tween<Node> | null = null;
@@ -302,6 +303,10 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             this.completedContainers++;
         }
 
+        if (this.completedCollectionContainers.length >= 2 && this.ctaButton && !this.hasShownMidgameCTA) {
+            this.showMidgameCTA();
+        }
+
         const replacedLaneIndex = this.replaceCompletedLane(container);
         this.revealPackedStack(replacedLaneIndex);
         this.scheduleOnce(() => {
@@ -329,6 +334,26 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             }
         }
         return null;
+    }
+
+    private showMidgameCTA() {
+        if (!this.ctaButton || !this.ctaButton.node || !this.ctaButton.node.isValid) return;
+
+        this.hasShownMidgameCTA = true;
+        if (this.endScreenPanel || this.endScreenIcon) {
+            this.showEndScreen();
+            return;
+        }
+
+        this.ctaButton.node.active = true;
+        this.ctaButton.node.setScale(v3(0.7, 0.7, 1));
+        this.ctaButton.interactable = true;
+
+        const ctaOpacity = this.ctaButton.node.getComponent(UIOpacity) || this.ctaButton.node.addComponent(UIOpacity);
+        ctaOpacity.opacity = 0;
+
+        tween(ctaOpacity).to(0.35, { opacity: 255 }, { easing: 'cubicOut' }).start();
+        tween(this.ctaButton.node).to(0.45, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
     }
 
     private revealPackedStack(laneIndex: number) {
@@ -748,12 +773,12 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
     }
 
     private showEndScreen() {
-        if (this.endScreenPanel) {
+        if (this.endScreenPanel || this.ctaButton?.node) {
             this.trackAnalytics(analyticsEvents.ENDCARD_SHOWN);
-            this.endScreenPanel.active = true;
+            if (this.endScreenPanel) this.endScreenPanel.active = true;
 
-            const panelOpacity = this.endScreenPanel.getComponent(UIOpacity);
-            const elementsToAnimate = [this.endScreenIcon, this.ctaButton?.node];
+            const panelOpacity = this.endScreenPanel ? this.endScreenPanel.getComponent(UIOpacity) : null;
+            const elementsToAnimate = [this.endScreenIcon, this.ctaButton?.node].filter((el): el is Node => !!el && !!el.isValid);
 
             if (panelOpacity) panelOpacity.opacity = 0;
 
@@ -795,6 +820,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
         this.isGameStarted = false; this.isGameOver = false; this.isHintActive = false;
         this.totalCoinsCollected = 0; this.currentTime = this.gameDuration;
+        this.hasShownMidgameCTA = false;
         this.hasSentProgress25 = false;
         this.hasSentProgress50 = false;
         this.hasSentProgress75 = false;
@@ -811,7 +837,10 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         this.totalContainers = this.activeCollectionContainers.length;
 
         if (this.timerLabel) this.timerLabel.node.active = true;
-        if (this.ctaButton) this.ctaButton.interactable = true;
+        if (this.ctaButton) {
+            this.ctaButton.interactable = false;
+            if (this.ctaButton.node) this.ctaButton.node.active = false;
+        }
 
         this.updateGameTimer(0);
         this.collectionContainers.forEach(container => {
