@@ -9430,12 +9430,8 @@
     "luckLevelProgressBar": {
       "__id__": 292
     },
-    "zoomInstructionText": {
-      "__id__": 137
-    },
-    "ZoomAnim": {
-      "__id__": 141
-    },
+    "zoomInstructionText": null,
+    "ZoomAnim": null,
     "containerSpacing": 175,
     "containerStartPos": {
       "__type__": "cc.Vec3",

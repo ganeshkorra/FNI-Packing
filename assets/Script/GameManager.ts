@@ -253,7 +253,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
     private showZoomInstruction() {
         if (!this.zoomInstructionText) return;
         this._hasShownZoomHint = true;
-        this.ZoomAnim.active = true;
+        if (this.ZoomAnim) this.ZoomAnim.active = true;
         this.zoomInstructionText.active = true;
         this.zoomInstructionText.setScale(Vec3.ZERO);
         const opacity = this.zoomInstructionText.getComponent(UIOpacity);
@@ -276,7 +276,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
     }
 
     private hideZoomInstruction() {
-        this.ZoomAnim.active = false;
+        if (this.ZoomAnim) this.ZoomAnim.active = false;
         // If the node isn't visible, don't do anything
         if (!this.zoomInstructionText || !this.zoomInstructionText.active) return;
 
@@ -654,7 +654,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         this.isGameStarted = true;
         this.trackAnalytics(analyticsEvents.CHALLENGE_STARTED);
         this.stopTutorial();
-        this.ZoomAnim.active = false;
+        if (this.ZoomAnim) this.ZoomAnim.active = false;
         this.hideInstructionText();
         if (this.backgroundMusic) {
             this.backgroundMusic.play();
