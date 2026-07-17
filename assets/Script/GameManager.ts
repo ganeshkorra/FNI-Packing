@@ -1043,19 +1043,6 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
         this.stopTutorialContainerPulse();
 
-        const node = container.node;
-        const laneIndex = this.visibleCollectionLanes.indexOf(container);
-        const baseScale = this.panelHomeScales[laneIndex] || node.scale.clone();
-        const pulseScale = v3(baseScale.x * 1.06, baseScale.y * 1.06, baseScale.z);
-
-        node.setScale(baseScale);
-        this.tutorialPulseTween = tween(node)
-            .to(0.5, { scale: pulseScale }, { easing: 'sineInOut' })
-            .to(0.5, { scale: baseScale }, { easing: 'sineInOut' })
-            .union()
-            .repeatForever()
-            .start();
-
         const slotNodes = (container.targetSlots.length > 0 ? container.targetSlots : container.node.children)
             .filter((slot): slot is Node => !!slot && slot.isValid);
 
@@ -1067,7 +1054,7 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             this.tutorialPulseSlotOriginalScales.set(slotNode, originalScale);
             slotNode.setScale(originalScale);
 
-            const slotPulseScale = v3(originalScale.x * 1.12, originalScale.y * 1.12, originalScale.z);
+            const slotPulseScale = v3(originalScale.x * 1, originalScale.y * 1, originalScale.z);
             tween(slotNode)
                 .to(0.5, { scale: slotPulseScale }, { easing: 'sineInOut' })
                 .to(0.5, { scale: originalScale }, { easing: 'sineInOut' })
@@ -1093,14 +1080,6 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
 
         this.tutorialPulseSlotNodes.length = 0;
         this.tutorialPulseSlotOriginalScales.clear();
-
-        if (this.tutorialPulseContainer && this.tutorialPulseContainer.node && this.tutorialPulseContainer.node.isValid) {
-            const laneIndex = this.visibleCollectionLanes.indexOf(this.tutorialPulseContainer);
-            const node = this.tutorialPulseContainer.node;
-            const baseScale = this.panelHomeScales[laneIndex] || node.scale.clone();
-            node.setScale(baseScale);
-        }
-
         this.tutorialPulseContainer = null;
     }
 
