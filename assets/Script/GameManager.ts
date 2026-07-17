@@ -118,6 +118,8 @@ public waitingAutoFlyDelay: number = 0.58;
     private glowTween: Tween<Node> | null = null;
     private tutorialPulseTween: Tween<Node> | null = null;
     private tutorialPulseContainer: CollectionContainer | null = null;
+    private tutorialPulseSlotNodes: Node[] = [];
+    private tutorialPulseSlotOriginalScales: Map<Node, Vec3> = new Map();
     private isHintActive: boolean = false;
     private totalCoinsCollected: number = 0;
     private isHintInstructionVisible: boolean = false;
@@ -451,7 +453,8 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             return targetContainer.collectItem(coinNode, spriteFrame, worldPos);
         }
 
-        return this.moveItemToWaitingBoard(coinNode, spriteFrame, worldPos, targetContainer);
+        coinNode.getComponent(CollectibleCoin)?.shakeIncorrectTarget();
+        return false;
     }
 
     private isContainerVisible(container: CollectionContainer): boolean {
@@ -1038,6 +1041,8 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
     private pulseTutorialContainer(container: CollectionContainer | null) {
         if (!container || !container.node || !container.node.isValid) return;
 
+        this.stopTutorialContainerPulse();
+
         const node = container.node;
         const laneIndex = this.visibleCollectionLanes.indexOf(container);
         const baseScale = this.panelHomeScales[laneIndex] || node.scale.clone();
@@ -1050,6 +1055,26 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             .union()
             .repeatForever()
             .start();
+
+        const slotNodes = (container.targetSlots.length > 0 ? container.targetSlots : container.node.children)
+            .filter((slot): slot is Node => !!slot && slot.isValid);
+
+        this.tutorialPulseSlotNodes = slotNodes;
+        this.tutorialPulseSlotOriginalScales.clear();
+
+        slotNodes.forEach((slotNode) => {
+            const originalScale = slotNode.scale.clone();
+            this.tutorialPulseSlotOriginalScales.set(slotNode, originalScale);
+            slotNode.setScale(originalScale);
+
+            const slotPulseScale = v3(originalScale.x * 1.12, originalScale.y * 1.12, originalScale.z);
+            tween(slotNode)
+                .to(0.5, { scale: slotPulseScale }, { easing: 'sineInOut' })
+                .to(0.5, { scale: originalScale }, { easing: 'sineInOut' })
+                .union()
+                .repeatForever()
+                .start();
+        });
     }
 
     private stopTutorialContainerPulse() {
@@ -1057,6 +1082,17 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
             this.tutorialPulseTween.stop();
             this.tutorialPulseTween = null;
         }
+
+        this.tutorialPulseSlotNodes.forEach((slotNode) => {
+            tween(slotNode).stop();
+            const originalScale = this.tutorialPulseSlotOriginalScales.get(slotNode);
+            if (originalScale) {
+                slotNode.setScale(originalScale);
+            }
+        });
+
+        this.tutorialPulseSlotNodes.length = 0;
+        this.tutorialPulseSlotOriginalScales.clear();
 
         if (this.tutorialPulseContainer && this.tutorialPulseContainer.node && this.tutorialPulseContainer.node.isValid) {
             const laneIndex = this.visibleCollectionLanes.indexOf(this.tutorialPulseContainer);

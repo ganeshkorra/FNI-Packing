@@ -389,7 +389,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": -149.615,
-      "y": 508.182,
+      "y": 392.27,
       "z": 0
     },
     "_lrot": {
@@ -498,7 +498,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 155.615,
-      "y": 508.182,
+      "y": 392.27,
       "z": 0
     },
     "_lrot": {
@@ -610,7 +610,7 @@
         "__id__": 27
       }
     ],
-    "_active": true,
+    "_active": false,
     "_components": [
       {
         "__id__": 30
@@ -623,7 +623,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": 336.993,
+      "y": 221.081,
       "z": 0
     },
     "_lrot": {
@@ -1221,10 +1221,7 @@
       "b": 255,
       "a": 255
     },
-    "_spriteFrame": {
-      "__uuid__": "42c6b524-bb24-48c8-8526-c7c5c10be051@f9941",
-      "__expectedType__": "cc.SpriteFrame"
-    },
+    "_spriteFrame": null,
     "_type": 0,
     "_fillType": 0,
     "_sizeMode": 1,
@@ -1284,7 +1281,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": 532.387,
+      "y": 416.475,
       "z": 0
     },
     "_lrot": {
@@ -9072,7 +9069,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": 190.743,
+      "y": 244.374,
       "z": 0
     },
     "_lrot": {
@@ -9135,9 +9132,9 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 226,
-      "g": 215,
-      "b": 197,
+      "r": 255,
+      "g": 255,
+      "b": 255,
       "a": 255
     },
     "_string": "FIND ALL ITEMS!",
@@ -9446,26 +9443,8 @@
       "y": -1040.557,
       "z": 0
     },
-    "waitingBoard": {
-      "__id__": 14
-    },
-    "waitingSlots": [
-      {
-        "__id__": 15
-      },
-      {
-        "__id__": 18
-      },
-      {
-        "__id__": 21
-      },
-      {
-        "__id__": 24
-      },
-      {
-        "__id__": 27
-      }
-    ],
+    "waitingBoard": null,
+    "waitingSlots": [],
     "introBackgroundNode": null,
     "gameplayRootNode": null,
     "stackFrameNodes": [
