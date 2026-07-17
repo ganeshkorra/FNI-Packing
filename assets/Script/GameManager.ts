@@ -100,6 +100,7 @@ public tutorialAfterIntroDelay: number = 0.25;
 public waitingAutoFlyDelay: number = 0.58;
 
     private _zoomGuideActive: boolean = false;
+    private _zoomGuideFallbackScheduled: boolean = false;
 
     private _hasShownZoomHint: boolean = false;
 
@@ -216,10 +217,20 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
         this.totalCoinsCollected++;
         this.updateMainProgressBar();
 
-        // CHECK FOR FIRST ITEM COLLECTION
         if (this.totalCoinsCollected === 1 && !this._hasShownZoomHint) {
             this.showZoomInstruction();
             this.playZoomAnimation();
+
+            if (!this._zoomGuideFallbackScheduled) {
+                this._zoomGuideFallbackScheduled = true;
+                this.scheduleOnce(() => {
+                    this._zoomGuideFallbackScheduled = false;
+                    if (this.isGameStarted && !this.isGameOver && this._zoomGuideActive) {
+                        this.hideZoomInstruction();
+                        this.triggerHint();
+                    }
+                }, this.hintInterval);
+            }
         }
 
         this.checkWinCondition();
@@ -228,12 +239,14 @@ private realignContainers(finishedNode: Node | null = null, speed: number = 0.5)
     if (!this.ZoomAnim) return;
 
     this._zoomGuideActive = true;
+    this._hasShownZoomHint = true;
     this.ZoomAnim.active = true;
+    this.ZoomAnim.setScale(Vec3.ONE);
 
-    // Assuming the Animation component is on the node itself
     const anim = this.ZoomAnim.getComponent('cc.Animation') as any;
     if (anim) {
-        anim.play('run'); 
+        anim.stop();
+        anim.play('run');
     }
 }
 
@@ -1198,11 +1211,32 @@ private getTutorialGlowScale(target: Node, multiplier: number = 1): Vec3 {
     return v3(fit, fit, 1);
 }
 
-    // Update your triggerHint to store the current target
+    private getCurrentVisibleHintTarget(): Node | null {
+        const preferredContainer = this.getActiveContainer();
+        if (preferredContainer) {
+            const preferredItem = preferredContainer.collectibleItems.find((itemNode) => {
+                return !!itemNode && itemNode.isValid && this.uncollectedCoins.indexOf(itemNode) !== -1;
+            });
+            if (preferredItem) return preferredItem;
+        }
+
+        for (const container of this.visibleCollectionLanes) {
+            if (!container) continue;
+            const visibleItem = container.collectibleItems.find((itemNode) => {
+                return !!itemNode && itemNode.isValid && this.uncollectedCoins.indexOf(itemNode) !== -1;
+            });
+            if (visibleItem) return visibleItem;
+        }
+
+        return null;
+    }
+
     private triggerHint() {
         if (this.uncollectedCoins.length === 0) return;
+
+        const visibleHintTarget = this.getCurrentVisibleHintTarget();
         const randomIndex = Math.floor(Math.random() * this.uncollectedCoins.length);
-        this._currentHintTarget = this.uncollectedCoins[randomIndex]; // Store the target
+        this._currentHintTarget = visibleHintTarget || this.uncollectedCoins[randomIndex];
 
         if (this._currentHintTarget && this._currentHintTarget.isValid) {
             this.isHintActive = true;
